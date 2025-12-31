@@ -1,0 +1,123 @@
+# Configuración Central de Scrapelio Browser
+# Este archivo centraliza todas las URLs y configuraciones del sistema
+# Modificar aquí en lugar de hardcodear en el código
+
+# ============================================
+# CONFIGURACIÓN DEL BACKEND
+# ============================================
+backend:
+  # URL primaria del backend API
+  primary_url: "http://192.168.1.130:8000"
+  
+  # URLs de fallback si la primaria falla
+  fallback_urls:
+    - "http://localhost:8000"
+    - "http://127.0.0.1:8000"
+  
+  # Timeouts diferenciados por tipo de operación (en segundos)
+  # Aumentados para mayor estabilidad en conexiones lentas
+  timeouts:
+    auth: 30          # Login/registro/verificación (aumentado de 15s)
+    api: 20           # Requests API normales (aumentado de 10s)
+    plugin_download: 120  # Descarga de plugins grandes (aumentado de 60s)
+    quick_check: 10   # Health checks rápidos (aumentado de 5s)
+    connection_check: 15  # Verificación de conectividad inicial
+  
+  # Configuración de reintentos con backoff exponencial
+  max_retries: 5      # Aumentado de 3 a 5 intentos
+  retry_backoff: 2.0  # Multiplicador de backoff exponencial (2^n)
+  initial_retry_delay: 1.0  # Delay inicial en segundos antes del primer reintento
+  max_retry_delay: 30.0     # Delay máximo entre reintentos
+  
+  # Configuración de validación de licencias
+  license_validation:
+    interval: 300     # Cada 5 minutos (en segundos)
+    cache_duration: 300  # Duración del caché (5 minutos)
+
+# ============================================
+# CONFIGURACIÓN DEL FRONTEND/SITIO WEB
+# ============================================
+frontend:
+  # URL del sitio web estático
+  url: "http://192.168.1.130:4321"
+  
+  # URLs específicas
+  registration_url: "http://192.168.1.130:4321/auth/registro.html"
+  login_url: "http://192.168.1.130:4321/auth/login.html"
+  dashboard_url: "http://192.168.1.130:4321/app/dashboard.html"
+
+# ============================================
+# CONFIGURACIÓN DE EMAIL (MAILHOG)
+# ============================================
+smtp:
+  host: "localhost"
+  port: 1025        # Puerto SMTP de MailHog
+  web_port: 8025    # Puerto web de MailHog
+  from_email: "noreply@scrapelio.com"
+  
+# ============================================
+# CONFIGURACIÓN DE PLUGINS
+# ============================================
+plugins:
+  # Directorio de plugins (relativo al directorio del backend)
+  directory: "../products"
+  
+  # Configuración de caché
+  cache_duration: 300  # 5 minutos
+  
+  # Intervalo de validación de licencias
+  validation_interval: 300  # 5 minutos (más conservador que el anterior de 60s)
+  
+  # Validación de plugins
+  validate_checksum: true
+  validate_signature: false  # Para futuro
+  
+  # Backup antes de instalar
+  create_backup: true
+  backup_directory: "./plugin_backups"
+
+# ============================================
+# CONFIGURACIÓN DE SEGURIDAD
+# ============================================
+security:
+  # Almacenamiento de tokens
+  use_keyring: false  # Si true, usa keyring del SO (más seguro)
+  use_qsettings: true # Si true, usa QSettings (más simple)
+  
+  # JWT
+  secret_key: "scrapelio-secret-key-change-in-production"
+  algorithm: "HS256"
+  access_token_expire_minutes: 30
+  refresh_token_expire_days: 7
+
+# ============================================
+# CONFIGURACIÓN DE RED
+# ============================================
+network:
+  # Modo de red: 'localhost' o 'network'
+  mode: "network"
+  
+  # Verificación de conectividad
+  health_check_interval: 30  # Segundos
+  connection_timeout: 10
+  
+# ============================================
+# CONFIGURACIÓN DE LOGGING
+# ============================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: "scrapelio_browser.log"
+  max_size: 10485760  # 10 MB
+  backup_count: 3
+
+# ============================================
+# CONFIGURACIÓN DE BASE DE DATOS
+# ============================================
+database:
+  # Para el navegador (bases de datos locales)
+  bookmarks: "bookmarks.db"
+  passwords: "passwords.db"
+  
+  # Para sesiones y caché
+  session_file: "session.db"
+

@@ -1,0 +1,13 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file>icons/new-tab.png</file>
+        <file>icons/refresh.png</file>
+        <file>icons/back.png</file>
+        <file>icons/forward.png</file>
+        <file>icons/home.png</file>
+        <file>icons/bookmark.png</file>
+        <file>icons/history.png</file>
+        <file>icons/settings.png</file>
+    </qresource>
+</RCC> 

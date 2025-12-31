@@ -1,0 +1,61 @@
+{
+  "id": "dark",
+  "name": "Dark Theme",
+  "description": "Tema oscuro por defecto con alto contraste",
+  "version": "1.0.0",
+  "colors": {
+    "primary": "#ffffff",
+    "secondary": "#e0e0e0",
+    "background": "#1a1a1a",
+    "surface": "#2d2d2d",
+    "accent": "#0078d4",
+    "success": "#107c10",
+    "warning": "#ff8c00",
+    "error": "#d13438",
+    "border": "#666666",
+    "hover": "#404040",
+    "selected": "#0078d433",
+    "button_background": "#666666",
+    "button_border": "#888888",
+    "button_hover": "#777777",
+    "button_pressed": "#555555",
+    "toolbar_background": "#2d2d2d",
+    "toolbar_border": "#666666",
+    "input_background": "#373737",
+    "input_border": "#666666",
+    "input_focus": "#0078d4",
+    "tab_background": "#373737",
+    "tab_selected": "#2d2d2d",
+    "tab_hover": "#404040",
+    "login_button": "#3498db",
+    "login_button_hover": "#2980b9",
+    "login_button_pressed": "#21618c",
+    "logout_button": "#e74c3c",
+    "logout_button_hover": "#c0392b",
+    "logout_button_pressed": "#a93226",
+    "status_success": "#27ae60"
+  },
+  "fonts": {
+    "family": "Segoe UI, Arial, sans-serif",
+    "size_small": "9pt",
+    "size_normal": "10pt",
+    "size_large": "12pt",
+    "size_title": "14pt"
+  },
+  "spacing": {
+    "xs": "2px",
+    "sm": "4px",
+    "md": "8px",
+    "lg": "12px",
+    "xl": "16px"
+  },
+  "borders": {
+    "radius": "4px",
+    "width": "1px"
+  },
+  "effects": {
+    "glow": false,
+    "neon": false,
+    "scan_lines": false
+  }
+}
