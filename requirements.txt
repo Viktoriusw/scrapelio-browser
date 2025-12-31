@@ -1,0 +1,43 @@
+# Dependencias principales del navegador
+PySide6>=6.5.0
+PyQt6>=6.5.0
+
+# Para el panel de chat con IA
+requests>=2.28.0
+
+# Para el scraping y análisis de datos
+beautifulsoup4>=4.11.0
+lxml>=4.9.0
+selenium>=4.8.0
+playwright>=1.30.0
+aiohttp>=3.8.0
+readability>=0.3.1
+schedule>=1.2.0
+
+# Para manejo de datos
+pandas>=1.5.0
+numpy>=1.24.0
+
+# Para exportación de datos
+openpyxl>=3.0.0
+PyYAML>=6.0
+
+# Para iconos y gráficos
+Pillow>=9.0.0
+
+# Para manejo de proxies
+requests[socks]>=2.28.0
+
+# Para desarrollo y testing
+pytest>=7.0.0
+pytest-qt>=4.0.0
+pytest-mock>=3.10.0
+
+# Para temas modernos y iconos vectoriales
+qdarktheme>=2.0
+qtawesome>=1.3
+
+# Para autenticación y validación de licencias
+requests>=2.28.0
+PyJWT>=2.8.0
+cryptography>=41.0.0 

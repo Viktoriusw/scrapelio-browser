@@ -1,0 +1,18 @@
+! Custom AdBlock filters for YouTube and additional ads
+||googleads.g.doubleclick.net^
+||pagead2.googlesyndication.com^
+||pubads.g.doubleclick.net^
+||securepubads.g.doubleclick.net^
+||youtube.com/api/stats/ads$xmlhttprequest
+||youtube.com/pagead/$xmlhttprequest,subdocument
+||youtube.com/get_video_info?*adformat*
+||youtube.com/youtubei/v1/player/ad_break*
+||youtube.com/api/stats/watchtime*
+||youtube.com/ptracking*
+||googlevideo.com/videoplayback*adformat*
+! Block additional ad tracking
+||google-analytics.com^$third-party
+||googletagmanager.com^$third-party
+||facebook.com/tr/*$image,script
+||facebook.net/en_US/fbevents.js
+||connect.facebook.net^$third-party
