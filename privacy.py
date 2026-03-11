@@ -3505,11 +3505,11 @@ class PrivacyManager(QWidget):
 
             scripts = profile.scripts()
 
-            existing_script = scripts.findScript("yt-adblock")
+            # existing_script = scripts.findScript("yt-adblock")  # DESACTIVADO: método no existe en PySide6
 
-            if not existing_script.isNull():
+            # if not existing_script.isNull():  # DESACTIVADO
 
-                scripts.remove(existing_script)
+                # scripts.remove(existing_script)  # DESACTIVADO
 
 
 
@@ -3767,11 +3767,11 @@ class PrivacyManager(QWidget):
 
                         scripts = profile.scripts()
 
-                        existing_script = scripts.findScript("yt-adblock")
+                        # existing_script = scripts.findScript("yt-adblock")  # DESACTIVADO: método no existe en PySide6
 
-                        if not existing_script.isNull():
+                        # if not existing_script.isNull():  # DESACTIVADO
 
-                            scripts.remove(existing_script)
+                            # scripts.remove(existing_script)  # DESACTIVADO
 
                     except Exception as e:
 

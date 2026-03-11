@@ -12,6 +12,8 @@ from PySide6.QtGui import QIcon
 
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 
+from tab_groups import TabGroupManager
+
 
 
 class TabManager:
@@ -27,6 +29,7 @@ class TabManager:
         self.parent = parent
 
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("browserTabs")
 
         self.tabs.setDocumentMode(True)  # Flat tabs style
 
@@ -52,6 +55,12 @@ class TabManager:
 
         # Pestañas fijadas (pinned tabs)
         self.pinned_tabs = set()  # Conjunto de índices de pestañas fijadas
+
+        # Tab Groups Manager
+        self.group_manager = TabGroupManager(parent=self.parent)
+
+        # Diccionario para trackear conexiones de señales y prevenir memory leaks
+        self._signal_connections = {}
 
         # Don't create initial tab here - let ui.py handle it after session restore
 
@@ -111,25 +120,40 @@ class TabManager:
 
 
 
-    def add_new_tab(self, url="https://duckduckgo.com"):
+    def add_new_tab(self, url=None):
 
         """Creates a new tab and returns it"""
 
         try:
 
-            if not isinstance(url, str) or not url.strip():
-
-                url = "https://duckduckgo.com"
+            # Si no se proporciona URL, usar la página de inicio configurada
+            if url is None or not isinstance(url, str) or not url.strip():
+                # Usar homepage_manager si está disponible
+                if hasattr(self.parent, 'homepage_manager') and self.parent.homepage_manager:
+                    url = self.parent.homepage_manager.get_new_tab_url()
+                    print(f"[TabManager] Using configured homepage: {url}")
+                else:
+                    # Fallback: usar motor de búsqueda predeterminado
+                    if hasattr(self.parent, 'search_engine_manager') and self.parent.search_engine_manager:
+                        default_engine = self.parent.search_engine_manager.get_default_engine()
+                        if default_engine.id == 'google':
+                            url = "https://www.google.com"
+                        elif default_engine.id == 'duckduckgo':
+                            url = "https://duckduckgo.com"
+                        elif default_engine.id == 'bing':
+                            url = "https://www.bing.com"
+                        else:
+                            url = "https://duckduckgo.com"
+                    else:
+                        url = "https://duckduckgo.com"
 
 
 
             # Crear el navegador
-
             browser = QWebEngineView()
 
-            browser.setUrl(QUrl(url))
-
-
+            # ⚠️ IMPORTANTE: Configurar el perfil ANTES de establecer la URL
+            # para que la primera petición HTTP use el User-Agent correcto
 
             # Configurar el perfil con datos aislados por usuario
             profile = browser.page().profile()
@@ -152,33 +176,60 @@ class TabManager:
             profile.setPersistentCookiesPolicy(QWebEngineProfile.AllowPersistentCookies)
             profile.setHttpCacheType(QWebEngineProfile.DiskHttpCache)
 
-            # Configurar interceptor de red si está disponible
+            # Configurar User-Agent del perfil (MÉTODO CORRECTO DE QT)
             if hasattr(self.parent, 'network_interceptor') and self.parent.network_interceptor:
                 try:
+                    # Obtener el User-Agent configurado
+                    user_agent_string = self.parent.network_interceptor._get_user_agent()
+
+                    # MÉTODO 1: Configurar User-Agent a nivel de perfil (afecta a navigator.userAgent)
+                    profile.setHttpUserAgent(user_agent_string)
+                    print(f"[UA-PROFILE] User-Agent set on profile: {self.parent.network_interceptor.user_agent_type}")
+
+                    # MÉTODO 2: Configurar interceptor de red (afecta a headers HTTP)
                     profile.setUrlRequestInterceptor(self.parent.network_interceptor)
-                    print(f"[NETWORK] Interceptor configured - UA: {self.parent.network_interceptor.user_agent_type}")
+                    print(f"[UA-INTERCEPTOR] HTTP headers interceptor configured")
+
                 except Exception as e:
-                    print(f"[WARNING] Could not set network interceptor: {e}")
+                    print(f"[WARNING] Could not configure User-Agent: {e}")
+
+            # ✅ AHORA sí establecer la URL - se cargará con el User-Agent correcto
+            browser.setUrl(QUrl(url))
 
 
 
-            # Conectar señales
+            # Conectar señales y guardar referencias para desconectar después
+            browser_id = id(browser)
+            self._signal_connections[browser_id] = {}
 
-            browser.urlChanged.connect(self.on_url_changed)
+            # Conectar urlChanged (múltiples conexiones)
+            url_changed_1 = lambda url, b=browser: self.on_url_changed(url, b)
+            url_changed_2 = self.history_manager.record_history
+            browser.urlChanged.connect(url_changed_1)
+            browser.urlChanged.connect(url_changed_2)
+            self._signal_connections[browser_id]['urlChanged'] = [url_changed_1, url_changed_2]
 
-            browser.urlChanged.connect(self.history_manager.record_history)
+            # Conectar titleChanged
+            title_changed = lambda title: self.update_tab_title(title, browser)
+            browser.titleChanged.connect(title_changed)
+            self._signal_connections[browser_id]['titleChanged'] = title_changed
 
-            browser.titleChanged.connect(lambda title: self.update_tab_title(title, browser))
+            # Conectar iconChanged
+            icon_changed = lambda icon: self.update_tab_icon(icon, browser)
+            browser.iconChanged.connect(icon_changed)
+            self._signal_connections[browser_id]['iconChanged'] = icon_changed
 
-            browser.iconChanged.connect(lambda icon: self.update_tab_icon(icon, browser))
 
-            
+
+
 
             # Configurar menú contextual
 
             browser.setContextMenuPolicy(Qt.CustomContextMenu)
 
-            browser.customContextMenuRequested.connect(lambda pos: self.show_context_menu(pos, browser))
+            context_menu = lambda pos: self.show_context_menu(pos, browser)
+            browser.customContextMenuRequested.connect(context_menu)
+            self._signal_connections[browser_id]['customContextMenuRequested'] = context_menu
 
 
 
@@ -212,7 +263,10 @@ class TabManager:
 
             self.tabs.setCurrentIndex(index)
 
-            
+
+
+            # Notificar al group manager sobre la nueva pestaña
+            self.group_manager.on_tab_added(index)
 
             # Actualizar la barra de URL si está disponible
 
@@ -220,11 +274,11 @@ class TabManager:
 
                 self.parent.url_bar.setText(url)
 
-            
+
 
             # TODO V2: Aplicar profile del grupo aquí si la pestaña va a un grupo específico
 
-                
+
 
             print(f"Tab created successfully with URL: {url}")
 
@@ -280,7 +334,15 @@ class TabManager:
 
                     title = title[:27] + "..."
 
-                
+
+
+                # Agregar indicador visual si la pestaña pertenece a un grupo
+                group = self.group_manager.get_tab_group(index)
+                if group:
+                    # Usar emoji de círculo coloreado como indicador visual
+                    title = f"● {title}"
+                    # Aplicar color del grupo al tab bar
+                    self._apply_group_color_to_tab(index, group.color)
 
                 self.tabs.setTabText(index, title)
 
@@ -288,12 +350,54 @@ class TabManager:
 
                     self.parent.setWindowTitle(f"{title} - Scrapelio")
 
-                    
+
 
         except Exception as e:
 
             print(f"Error al actualizar el título de la pestaña: {str(e)}")
 
+
+    def _disconnect_browser_signals(self, browser):
+        """Desconecta todas las señales de un browser para prevenir memory leaks"""
+        try:
+            # Obtener las conexiones guardadas para este browser
+            browser_id = id(browser)
+            if browser_id not in self._signal_connections:
+                return
+
+            connections = self._signal_connections[browser_id]
+
+            # Desconectar señales
+            try:
+                if 'urlChanged' in connections:
+                    for conn in connections['urlChanged']:
+                        browser.urlChanged.disconnect(conn)
+            except:
+                pass
+
+            try:
+                if 'titleChanged' in connections:
+                    browser.titleChanged.disconnect(connections['titleChanged'])
+            except:
+                pass
+
+            try:
+                if 'iconChanged' in connections:
+                    browser.iconChanged.disconnect(connections['iconChanged'])
+            except:
+                pass
+
+            try:
+                if 'customContextMenuRequested' in connections:
+                    browser.customContextMenuRequested.disconnect(connections['customContextMenuRequested'])
+            except:
+                pass
+
+            # Eliminar del diccionario
+            del self._signal_connections[browser_id]
+
+        except Exception as e:
+            print(f"Error al desconectar señales del browser: {str(e)}")
 
 
     def close_tab(self, index):
@@ -323,6 +427,13 @@ class TabManager:
                     self.pinned_tabs.discard(index)
                     # Actualizar índices de pestañas fijadas
                     self.pinned_tabs = {i - 1 if i > index else i for i in self.pinned_tabs}
+
+                # Desconectar señales del browser para prevenir memory leaks
+                if tab_widget:
+                    self._disconnect_browser_signals(tab_widget)
+
+                # Notificar al group manager para actualizar índices
+                self.group_manager.on_tab_closed(index)
 
                 self.tabs.removeTab(index)
 
@@ -373,14 +484,19 @@ class TabManager:
                 browser.reload()
 
             elif action == open_in_new_tab:
-
-                browser.page().runJavaScript(
-
-                    f"var elem = document.elementFromPoint({pos.x()}, {pos.y()}); elem ? elem.href : null;",
-
-                    self.open_link_in_new_tab
-
-                )
+                # Fallback to robust JavaScript detection
+                # We traverse up the DOM tree to find the anchor tag if the click was on a child element
+                js_code = f"""
+                (function() {{
+                    var elem = document.elementFromPoint({pos.x()}, {pos.y()});
+                    while (elem) {{
+                        if (elem.href) return elem.href;
+                        elem = elem.parentElement;
+                    }}
+                    return null;
+                }})();
+                """
+                browser.page().runJavaScript(js_code, self.open_link_in_new_tab)
 
             elif action == save_bookmark:
 
@@ -410,29 +526,43 @@ class TabManager:
 
 
 
-    def on_url_changed(self, url):
+    def on_url_changed(self, url, sender_browser):
 
         """Maneja el cambio de URL en una pestaña"""
 
         try:
+            print(f"\n{'='*60}")
+            print(f"[URL_CHANGED] Señal recibida: {url.toString()}")
+            print(f"{'='*60}")
 
-            # Actualizar la barra de URL si está disponible
+            # Solo actualizar la barra de URL si es la pestaña activa
+            current_browser = self.tabs.currentWidget()
+            print(f"[URL_CHANGED] Sender browser: {sender_browser}")
+            print(f"[URL_CHANGED] Current browser: {current_browser}")
 
-            if hasattr(self.parent, 'url_bar'):
+            if sender_browser == current_browser:
+                print(f"[URL_CHANGED] ✓ Es la pestaña activa - actualizando URL bar")
 
-                self.parent.url_bar.setText(url.toString())
+                # Actualizar la barra de URL si está disponible
 
-            if hasattr(self.parent, 'tabs'):
+                if hasattr(self.parent, 'url_bar'):
 
-                browser = self.tabs.currentWidget()
+                    self.parent.url_bar.setText(url.toString())
+                    print(f"[URL_CHANGED] ✓ URL bar actualizada a: {url.toString()}")
 
-                if browser:
+                if hasattr(self.parent, 'tabs'):
 
-                    self._inject_dark_scrollbar_css(browser)
+                    if current_browser:
+
+                        self._inject_dark_scrollbar_css(current_browser)
+            else:
+                print(f"[URL_CHANGED] ✗ NO es la pestaña activa - NO actualizando URL bar")
 
         except Exception as e:
 
-            print(f"Error al actualizar la URL: {str(e)}")
+            print(f"[URL_CHANGED] ERROR: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
 
 
@@ -572,7 +702,11 @@ class TabManager:
 
             for tab_data in session:
 
-                url = tab_data.get("url", "https://duckduckgo.com")
+                url = tab_data.get("url", "")
+                
+                # Si no hay URL guardada, usar None para que add_new_tab use el motor predeterminado
+                if not url or url == "about:blank":
+                    url = None
 
                 self.add_new_tab(url)
 
@@ -668,6 +802,35 @@ class TabManager:
 
         menu.addSeparator()
 
+        # === TAB GROUPS SECTION ===
+        # Get current group for this tab
+        current_group = self.group_manager.get_tab_group(index)
+
+        # Crear nuevo grupo con esta pestaña
+        create_group_action = menu.addAction("📑 Crear grupo con esta pestaña")
+
+        # Agregar a grupo existente (submenú)
+        add_to_group_menu = menu.addMenu("➕ Agregar a grupo")
+        all_groups = self.group_manager.get_all_groups()
+
+        if all_groups:
+            for group in all_groups:
+                # Skip if tab is already in this group
+                if current_group and current_group.id == group.id:
+                    continue
+                action = add_to_group_menu.addAction(f"● {group.name}")
+                action.setData(group.id)  # Store group_id in action data
+        else:
+            no_groups_action = add_to_group_menu.addAction("(No hay grupos)")
+            no_groups_action.setEnabled(False)
+
+        # Remover de grupo (solo si está en un grupo)
+        remove_from_group_action = None
+        if current_group:
+            remove_from_group_action = menu.addAction(f"➖ Quitar de '{current_group.name}'")
+
+        menu.addSeparator()
+
         # Fijar/Desfijar pestaña
         if index in self.pinned_tabs:
             pin_action = menu.addAction("📌 Desfijar pestaña")
@@ -694,6 +857,12 @@ class TabManager:
 
         close_right_action = menu.addAction("✕ Cerrar pestañas a la derecha")
 
+        menu.addSeparator()
+
+        # Split View (si el plugin está disponible)
+        split_view_action = None
+        if hasattr(self.parent, 'dynamic_plugin_panels') and 'split_view' in self.parent.dynamic_plugin_panels:
+            split_view_action = menu.addAction("⫿ Abrir en Split View")
 
 
         # Ejecutar menú
@@ -710,6 +879,24 @@ class TabManager:
 
         elif action == duplicate_action:
             self.duplicate_tab(index)
+
+        elif action == create_group_action:
+            # Crear nuevo grupo con esta pestaña
+            self._create_group_with_tab(index)
+
+        elif action in add_to_group_menu.actions() and action.data():
+            # Agregar pestaña a grupo existente
+            group_id = action.data()
+            self.group_manager.add_tab_to_group(group_id, index)
+            self._refresh_tab_appearance(index)
+            print(f"[TabGroups] Tab {index} added to group {group_id}")
+
+        elif action == remove_from_group_action:
+            # Remover pestaña del grupo actual
+            if current_group:
+                self.group_manager.remove_tab_from_group(current_group.id, index)
+                self._refresh_tab_appearance(index)
+                print(f"[TabGroups] Tab {index} removed from group {current_group.id}")
 
         elif action == pin_action:
             self.toggle_pin_tab(index)
@@ -729,6 +916,12 @@ class TabManager:
             # Cerrar todas las pestañas a la derecha
             for i in range(self.tabs.count() - 1, index, -1):
                 self.close_tab(i)
+
+        elif split_view_action and action == split_view_action:
+            # Abrir pestaña en Split View
+            if hasattr(self.parent, 'dynamic_plugin_panels') and 'split_view' in self.parent.dynamic_plugin_panels:
+                split_view_plugin = self.parent.dynamic_plugin_panels['split_view']
+                split_view_plugin.open_tab_in_split_view(index)
 
 
 
@@ -962,3 +1155,71 @@ class TabManager:
 
             except Exception as e:
                 print(f"[ERROR] Failed to inject script '{script['name']}': {e}")
+
+    # ============================================================================
+    # TAB GROUPS - Helper Methods
+    # ============================================================================
+
+    def _create_group_with_tab(self, tab_index):
+        """Create a new group and add this tab to it"""
+        from tab_groups_ui import CreateGroupDialog
+        from PySide6.QtWidgets import QDialog
+
+        # Get tab title for suggested group name
+        tab_title = self.tabs.tabText(tab_index).replace("● ", "").replace("📌 ", "").replace("🔇 ", "")
+
+        dialog = CreateGroupDialog(parent=self.parent)
+
+        # Suggest a name based on tab title
+        if tab_title and tab_title != "New Tab":
+            dialog.name_input.setText(tab_title[:20])
+
+        if dialog.exec() == QDialog.Accepted:
+            data = dialog.get_group_data()
+            if not data["name"]:
+                return
+
+            # Create group with this tab
+            group = self.group_manager.create_group(
+                name=data["name"],
+                color=data["color"],
+                tab_indices=[tab_index]
+            )
+
+            # Refresh tab appearance
+            self._refresh_tab_appearance(tab_index)
+
+            print(f"[TabGroups] Created group '{group.name}' with tab {tab_index}")
+
+    def _refresh_tab_appearance(self, index):
+        """Refresh the visual appearance of a tab (group indicator, color)"""
+        if index < 0 or index >= self.tabs.count():
+            return
+
+        browser = self.tabs.widget(index)
+        if browser and hasattr(browser, 'page'):
+            # Trigger title update which will apply group styling
+            self.update_tab_title(browser.page().title(), browser)
+
+    def _apply_group_color_to_tab(self, index, color):
+        """Apply group color styling to a tab"""
+        try:
+            from PySide6.QtGui import QPalette, QColor
+
+            tab_bar = self.tabs.tabBar()
+
+            # Create a custom palette for this tab
+            # Note: QTabBar doesn't support per-tab styling easily
+            # We use the color indicator (●) in the title as primary visual cue
+            # For more advanced styling, we could subclass QTabBar
+
+            # For now, we'll rely on the ● indicator in the title
+            # which provides a clear visual grouping indicator
+
+        except Exception as e:
+            print(f"[TabGroups] Error applying color to tab {index}: {e}")
+
+    def refresh_all_tab_appearances(self):
+        """Refresh all tab appearances (useful after group changes)"""
+        for i in range(self.tabs.count()):
+            self._refresh_tab_appearance(i)

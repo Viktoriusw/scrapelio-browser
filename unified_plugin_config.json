@@ -23,8 +23,8 @@
       },
       "permissions": ["web_access", "file_system", "data_export"],
       "icon": "scraping_icon.png",
-      "download_url": "http://192.168.1.130:8000/api/plugins/scraping/download",
-      "info_url": "http://192.168.1.130:8000/api/plugins/scraping/info"
+      "download_url": "http://192.168.1.175:8000/api/plugins/scraping/download",
+      "info_url": "http://192.168.1.175:8000/api/plugins/scraping/info"
     },
     "proxy": {
       "name": "Proxy Management",
@@ -47,8 +47,8 @@
       },
       "permissions": ["network_access", "proxy_configuration"],
       "icon": "proxy_icon.png",
-      "download_url": "http://192.168.1.130:8000/api/plugins/proxy/download",
-      "info_url": "http://192.168.1.130:8000/api/plugins/proxy/info"
+      "download_url": "http://192.168.1.175:8000/api/plugins/proxy/download",
+      "info_url": "http://192.168.1.175:8000/api/plugins/proxy/info"
     },
     "themes": {
       "name": "Advanced Theme System",
@@ -64,15 +64,15 @@
       "features": ["Real-time preview", "Custom themes", "Color picker", "Font configuration", "Export/Import"],
       "free_features": ["basic_themes"],
       "premium_features": ["custom_themes", "theme_editor", "animated_themes", "import_export"],
-      "trial_days": 3,
+      "trial_days": 7,
       "requirements": {
         "min_browser_version": "1.0.0",
         "dependencies": []
       },
       "permissions": ["ui_customization", "file_system"],
       "icon": "themes_icon.png",
-      "download_url": "http://192.168.1.130:8000/api/plugins/themes/download",
-      "info_url": "http://192.168.1.130:8000/api/plugins/themes/info"
+      "download_url": "http://192.168.1.175:8000/api/plugins/themes/download",
+      "info_url": "http://192.168.1.175:8000/api/plugins/themes/info"
     }
   },
   "categories": [

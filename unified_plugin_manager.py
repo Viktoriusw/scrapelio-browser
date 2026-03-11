@@ -945,6 +945,12 @@ class UnifiedPluginManager(QObject):
 
                 "trial_days": 7
 
+            },
+            "pentesting_tool": {
+                "name": "Pentesting Suite",
+                "free_features": ["basic_payloads", "form_detection"],
+                "premium_features": ["sql_injection", "xss_testing", "header_manipulation", "security_scanner", "js_console"],
+                "trial_days": 7
             }
 
 
@@ -1250,6 +1256,31 @@ class UnifiedPluginManager(QObject):
 
 
 
+        # Verificar si el plugin es gratuito leyendo su plugin_info.json
+        plugin_dir = Path("plugins") / plugin_id
+        plugin_info_file = plugin_dir / "plugin_info.json"
+        is_free_plugin = False
+
+        if plugin_info_file.exists():
+            try:
+                with open(plugin_info_file, 'r', encoding='utf-8') as f:
+                    plugin_info_data = json.load(f)
+                    is_free_plugin = not plugin_info_data.get("premium", True)  # Default to premium if not specified
+                    logger.info(f"[DEBUG] Plugin {plugin_id}: premium={plugin_info_data.get('premium', True)}, is_free_plugin={is_free_plugin}")
+            except Exception as e:
+                logger.warning(f"Failed to read plugin_info.json for {plugin_id}: {e}")
+
+        # Si el plugin es gratuito, permitir acceso sin autenticación
+        if is_free_plugin:
+            logger.info(f"Plugin {plugin_id} access granted: Free plugin (no auth required)")
+            return PluginAccessInfo(
+                plugin_id=plugin_id,
+                plugin_name=plugin_info_data.get("name", "Plugin Desconocido") if 'plugin_info_data' in locals() else "Plugin Desconocido",
+                access_level=PluginAccessLevel.FREE,
+                is_licensed=True,  # Free plugins are "licensed" by default
+                features_available=[]
+            )
+
         if not self.auth_manager:
 
 
@@ -1282,7 +1313,7 @@ class UnifiedPluginManager(QObject):
 
 
 
-        
+
 
 
 
@@ -1318,7 +1349,7 @@ class UnifiedPluginManager(QObject):
 
 
 
-        
+
 
 
 
@@ -2951,7 +2982,7 @@ class UnifiedPluginManager(QObject):
 
 
 
-                    logger.info(f"✅ Plugin {plugin_id} initialized successfully")
+                    logger.info(f"Plugin {plugin_id} initialized successfully")
 
 
 
@@ -3064,6 +3095,18 @@ class UnifiedPluginManager(QObject):
 
 
             if plugin_id in self.plugins:
+
+
+
+                plugin_instance = self.plugins[plugin_id]
+                
+                # Llamar al método shutdown() del plugin si existe
+                if hasattr(plugin_instance, 'shutdown'):
+                    try:
+                        logger.info(f"Calling shutdown() on plugin {plugin_id}")
+                        plugin_instance.shutdown()
+                    except Exception as e:
+                        logger.error(f"Error calling shutdown() on plugin {plugin_id}: {e}")
 
 
 
@@ -3267,11 +3310,12 @@ class UnifiedPluginManager(QObject):
 
 
 
-            
 
 
 
-            if access_info.access_level in [PluginAccessLevel.PREMIUM, PluginAccessLevel.TRIAL]:
+
+            # Permitir cargar plugins FREE, PREMIUM o TRIAL si tienen acceso
+            if access_info.is_licensed or access_info.access_level == PluginAccessLevel.FREE:
 
 
 
@@ -3283,7 +3327,7 @@ class UnifiedPluginManager(QObject):
 
 
 
-                
+
 
 
 
@@ -3291,7 +3335,7 @@ class UnifiedPluginManager(QObject):
 
 
 
-                    logger.info(f"✅ Loaded plugin: {plugin_id}")
+                    logger.info(f"Loaded plugin: {plugin_id} (access_level={access_info.access_level.value})")
 
 
 
@@ -3299,7 +3343,7 @@ class UnifiedPluginManager(QObject):
 
 
 
-                    logger.warning(f"❌ Failed to load plugin: {plugin_id}")
+                    logger.warning(f"Failed to load plugin: {plugin_id}")
 
 
 
@@ -3307,7 +3351,7 @@ class UnifiedPluginManager(QObject):
 
 
 
-                logger.info(f"⏭️ Skipping plugin {plugin_id} - no access")
+                logger.info(f"Skipping plugin {plugin_id} - no access (access_level={access_info.access_level.value}, is_licensed={access_info.is_licensed})")
 
 
 

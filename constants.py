@@ -194,6 +194,18 @@ SKIP_HEAVY_FILTERS = True
 DISABLE_HEAVY_FILTERS = True
 
 # ============================================================================
+# CONFIGURACIÓN DE GENTAB (Pestañas Generativas)
+# ============================================================================
+
+GENTAB_MAX_CONTENT_PER_TAB = 4000
+GENTAB_MAX_TOTAL_CONTEXT = 24000
+GENTAB_MAX_HISTORY = 50
+GENTAB_DEFAULT_TEMPERATURE = 0.7
+GENTAB_DEFAULT_MAX_TOKENS = 4000
+GENTAB_URL_SCHEME = "gentab://"
+GENTAB_INTERNAL_URL = "about:gentab"
+
+# ============================================================================
 # CÓDIGOS DE ESTADO HTTP
 # ============================================================================
 

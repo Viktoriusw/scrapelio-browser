@@ -1,0 +1,28 @@
+{
+  "groups": {
+    "group_1767211025750": {
+      "id": "group_1767211025750",
+      "name": "ZOO",
+      "color": "#d32f2f",
+      "tab_indices": [
+        497,
+        498
+      ],
+      "created_at": "2025-12-31T20:57:05.750986",
+      "collapsed": false
+    },
+    "group_1767870241837": {
+      "id": "group_1767870241837",
+      "name": "hjoa",
+      "color": "#388e3c",
+      "tab_indices": [
+        320,
+        321
+      ],
+      "created_at": "2026-01-08T12:04:01.837971",
+      "collapsed": false
+    }
+  },
+  "next_group_number": 1,
+  "saved_at": "2026-03-11T11:00:00.893853"
+}

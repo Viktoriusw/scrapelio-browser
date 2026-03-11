@@ -611,13 +611,13 @@ class UnifiedPluginPanel(BasePanel):
                 QMessageBox.information(self, "✅ Licencias Actualizadas", 
                                       f"Las licencias se han actualizado correctamente.\n\n"
                                       f"Licencias activas: {len(backend_integration.user_licenses)}")
-                print(f"[UnifiedPluginPanel] ✅ Licencias refrescadas: {len(backend_integration.user_licenses)} activas")
+                print(f"[UnifiedPluginPanel] Licencias refrescadas: {len(backend_integration.user_licenses)} activas")
             else:
                 QMessageBox.warning(self, "❌ Error", 
                                   "No se pudieron refrescar las licencias. Verifica tu conexión.")
                 
         except Exception as e:
-            print(f"[UnifiedPluginPanel] ❌ Error al refrescar licencias: {e}")
+            print(f"[UnifiedPluginPanel] Error al refrescar licencias: {e}")
             QMessageBox.critical(self, "Error", f"Error al refrescar licencias:\n{str(e)}")
     
     # ==================== MANEJADORES DE SEÑALES ====================
@@ -693,5 +693,5 @@ class UnifiedPluginPanel(BasePanel):
         if hasattr(self, 'refresh_management_tab'):
             self.refresh_management_tab()
         
-        print("[UnifiedPluginPanel] ✅ Panel refrescado completamente")
+        print("[UnifiedPluginPanel] Panel refrescado completamente")
 
