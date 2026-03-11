@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logoscrapelio.png" alt="Scrapelio Browser" width="220" />
+</p>
+
 ## Scrapelio Browser
 
 Navegador web ligero con sistema de plugins, IA integrada y foco en privacidad.
