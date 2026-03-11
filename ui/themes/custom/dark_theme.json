@@ -1,0 +1,48 @@
+{
+  "id": "dark_theme",
+  "name": "Dark Theme",
+  "description": "Tema oscuro por defecto con alto contraste",
+  "version": "1.0.0",
+  "colors": {
+    "primary": "#000000",
+    "secondary": "#e0e0e0",
+    "background": "#1a1a1a",
+    "surface": "#2d2d2d",
+    "accent": "#0078d4",
+    "success": "#107c10",
+    "warning": "#ff8c00",
+    "error": "#d13438",
+    "border": "#666666",
+    "hover": "#404040",
+    "selected": "#0078d433",
+    "text_primary": "#000000",
+    "text_secondary": "#000000",
+    "text_disabled": "#000000"
+  },
+  "fonts": {
+    "family": "Segoe UI, Arial, sans-serif",
+    "size_small": "9pt",
+    "size_normal": "10pt",
+    "size_large": "12pt",
+    "size_title": "14pt"
+  },
+  "spacing": {
+    "xs": "2px",
+    "sm": "4px",
+    "md": "8px",
+    "lg": "12px",
+    "xl": "16px",
+    "xxl": "24px"
+  },
+  "borders": {
+    "radius": "4px",
+    "width": "1px"
+  },
+  "effects": {
+    "glow": false,
+    "neon": false,
+    "scan_lines": false
+  },
+  "author": "Custom",
+  "type": "custom"
+}
