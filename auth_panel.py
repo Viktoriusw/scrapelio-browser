@@ -1462,7 +1462,7 @@ class LoginDialog(QDialog):
 
 
 
-        webbrowser.open("http://192.168.1.130:4321/auth/recuperar")
+        webbrowser.open("http://192.168.1.175:4321/auth/recuperar")
 
 
 
@@ -2334,7 +2334,7 @@ class AccountInfoWidget(QWidget):
 
 
 
-        webbrowser.open("http://192.168.1.130:4321/app/dashboard")
+        webbrowser.open("http://192.168.1.175:4321/app/dashboard")
 
 
 
@@ -2422,39 +2422,38 @@ class AuthPanel(BasePanel):
 
 
 
-        
 
 
 
-        # Conectar señales del auth manager
 
+        # Diccionario para trackear conexiones de señales y prevenir memory leaks
+        self._signal_connections = {}
 
+        # Conectar señales del auth manager y guardar referencias
+        auth_manager_id = id(self.auth_manager)
+        self._signal_connections[auth_manager_id] = {}
 
+        self._signal_connections[auth_manager_id]['auth_state_changed'] = self.on_auth_state_changed
         self.auth_manager.auth_state_changed.connect(self.on_auth_state_changed)
 
-
-
+        self._signal_connections[auth_manager_id]['login_successful'] = self.on_login_successful
         self.auth_manager.login_successful.connect(self.on_login_successful)
 
-
-
+        self._signal_connections[auth_manager_id]['login_failed'] = self.on_login_failed
         self.auth_manager.login_failed.connect(self.on_login_failed)
 
-
-
+        self._signal_connections[auth_manager_id]['logout_successful'] = self.on_logout_successful
         self.auth_manager.logout_successful.connect(self.on_logout_successful)
 
-
-
+        self._signal_connections[auth_manager_id]['plugin_license_changed'] = self.on_plugin_license_changed
         self.auth_manager.plugin_license_changed.connect(self.on_plugin_license_changed)
 
-
-
+        self._signal_connections[auth_manager_id]['connection_status_changed'] = self.on_connection_status_changed
         self.auth_manager.connection_status_changed.connect(self.on_connection_status_changed)
 
 
 
-        
+
 
 
 
@@ -2464,9 +2463,9 @@ class AuthPanel(BasePanel):
 
         self.status_timer = QTimer()
 
-
-
-        self.status_timer.timeout.connect(self.update_status)
+        status_timer_connection = self.update_status
+        self.status_timer.timeout.connect(status_timer_connection)
+        self._signal_connections['status_timer'] = status_timer_connection
 
 
 
@@ -3215,6 +3214,77 @@ class AuthPanel(BasePanel):
 
 
             self.validation_status.setText("Última validación: Nunca")
+
+
+    def _disconnect_signals(self):
+        """Desconectar todas las señales para prevenir memory leaks"""
+        try:
+            # Desconectar señales del auth_manager
+            auth_manager_id = id(self.auth_manager)
+            if auth_manager_id in self._signal_connections:
+                connections = self._signal_connections[auth_manager_id]
+
+                try:
+                    if 'auth_state_changed' in connections:
+                        self.auth_manager.auth_state_changed.disconnect(connections['auth_state_changed'])
+                except:
+                    pass
+
+                try:
+                    if 'login_successful' in connections:
+                        self.auth_manager.login_successful.disconnect(connections['login_successful'])
+                except:
+                    pass
+
+                try:
+                    if 'login_failed' in connections:
+                        self.auth_manager.login_failed.disconnect(connections['login_failed'])
+                except:
+                    pass
+
+                try:
+                    if 'logout_successful' in connections:
+                        self.auth_manager.logout_successful.disconnect(connections['logout_successful'])
+                except:
+                    pass
+
+                try:
+                    if 'plugin_license_changed' in connections:
+                        self.auth_manager.plugin_license_changed.disconnect(connections['plugin_license_changed'])
+                except:
+                    pass
+
+                try:
+                    if 'connection_status_changed' in connections:
+                        self.auth_manager.connection_status_changed.disconnect(connections['connection_status_changed'])
+                except:
+                    pass
+
+                del self._signal_connections[auth_manager_id]
+
+            # Desconectar timer
+            try:
+                if 'status_timer' in self._signal_connections:
+                    self.status_timer.timeout.disconnect(self._signal_connections['status_timer'])
+                    del self._signal_connections['status_timer']
+            except:
+                pass
+
+            # Detener timer
+            if hasattr(self, 'status_timer') and self.status_timer:
+                self.status_timer.stop()
+
+        except Exception as e:
+            print(f"Error al desconectar señales del AuthPanel: {str(e)}")
+
+    def closeEvent(self, event):
+        """Manejar cierre del panel"""
+        self._disconnect_signals()
+        super().closeEvent(event)
+
+    def __del__(self):
+        """Destructor del panel"""
+        self._disconnect_signals()
 
 
 

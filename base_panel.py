@@ -14,9 +14,20 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QHBoxLayout,
 
                                QGroupBox, QPushButton, QLabel)
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 
 from typing import List, Tuple, Callable, Dict, Any
+
+# Import theme system
+try:
+    from ui.core.theme_engine import get_theme_engine, get_color
+    THEME_AVAILABLE = True
+except ImportError:
+    THEME_AVAILABLE = False
+    def get_color(key, theme=None):
+        return "#000000"
+    def get_theme_engine():
+        return None
 
 
 
@@ -45,8 +56,21 @@ class BasePanel(QWidget):
         super().__init__(parent)
 
         self.tab_widget = None
+        
+        # Get current theme
+        self.settings = QSettings("Scrapelio", "Settings")
+        self.current_theme = self.settings.value("theme", "light")
 
         self.setup_ui()
+        
+        # Apply theme after UI setup
+        self._apply_base_theme()
+        
+        # Connect to theme changes if available
+        if THEME_AVAILABLE:
+            theme_engine = get_theme_engine()
+            if theme_engine:
+                theme_engine.theme_changed.connect(self._on_theme_changed)
 
     
 
@@ -313,4 +337,53 @@ class BasePanel(QWidget):
         
 
         return layout
+    
+    # === THEME SUPPORT ===
+    
+    def _apply_base_theme(self):
+        """
+        Apply base theme to the panel
+        Child classes can override this for custom theming
+        """
+        if not THEME_AVAILABLE:
+            return
+        
+        theme = self.current_theme
+        
+        # Get theme colors
+        bg = get_color("background", theme)
+        surface = get_color("surface", theme)
+        primary = get_color("primary", theme)
+        border = get_color("border", theme)
+        
+        # Apply basic theme to panel
+        if theme == "dark":
+            self.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {bg};
+                    color: {primary};
+                }}
+                QTabWidget::pane {{
+                    border: 1px solid {border};
+                    background-color: {bg};
+                }}
+                QGroupBox {{
+                    background-color: {surface};
+                    border: 1px solid {border};
+                    border-radius: 4px;
+                    margin-top: 8px;
+                    padding-top: 8px;
+                }}
+                QGroupBox::title {{
+                    color: {primary};
+                }}
+            """)
+    
+    def _on_theme_changed(self, theme_name):
+        """
+        Handle theme change signal
+        Child classes can override for additional theming
+        """
+        self.current_theme = theme_name
+        self._apply_base_theme()
 

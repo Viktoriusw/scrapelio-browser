@@ -166,11 +166,11 @@ NETWORK_CONFIG = {
 
 
 
-        "backend_ip": "192.168.1.130",  # Backend API
+        "backend_ip": "192.168.1.175",  # Backend API
 
 
 
-        "website_ip": "192.168.1.130",  # Sitio Web
+        "website_ip": "192.168.1.175",  # Sitio Web
 
 
 
@@ -250,7 +250,7 @@ FALLBACK_ENDPOINTS = {
 
 
 
-        "http://192.168.1.130:8000",
+        "http://192.168.1.175:8000",
 
 
 
@@ -270,7 +270,7 @@ FALLBACK_ENDPOINTS = {
 
 
 
-        "http://192.168.1.130:4321",
+        "http://192.168.1.175:4321",
 
 
 
@@ -1102,7 +1102,7 @@ def print_network_info():
 
 
 
-    print(f"Estado general: {'✅ CONECTADO' if health['all_connected'] else '❌ PROBLEMAS'}")
+    print(f"Estado general: {'CONECTADO' if health['all_connected'] else 'PROBLEMAS'}")
 
 
 
@@ -1142,7 +1142,7 @@ def test_connectivity() -> bool:
 
 
 
-    print("🔍 Verificando conectividad...")
+    print("Verificando conectividad...")
 
 
 
@@ -1162,11 +1162,11 @@ def test_connectivity() -> bool:
 
 
 
-    print(f"Backend: {'✅' if backend_status == NetworkStatus.CONNECTED else '❌'} {backend_status.value}")
+    print(f"Backend: {'OK' if backend_status == NetworkStatus.CONNECTED else 'FAIL'} {backend_status.value}")
 
 
 
-    print(f"Website: {'✅' if website_status == NetworkStatus.CONNECTED else '❌'} {website_status.value}")
+    print(f"Website: {'OK' if website_status == NetworkStatus.CONNECTED else 'FAIL'} {website_status.value}")
 
 
 

@@ -5,17 +5,30 @@ Panel de Chat con IA - Versión Segura
 
 import sys
 import json
+import re
 import time
 import requests
+from urllib.parse import quote_plus
+from urllib.parse import urlparse, parse_qs, unquote
 from datetime import datetime
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, 
                                QTextEdit, QPushButton, QLabel, QSpinBox, 
                                QLineEdit, QComboBox, QListWidget, QListWidgetItem,
                                QCheckBox, QGroupBox, QScrollArea, QFrame, QMessageBox,
                                QSplitter, QProgressBar, QSizePolicy)
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEventLoop
 from PySide6.QtGui import QFont, QColor, QTextCursor
 from base_panel import BasePanel
+
+# System prompt: la IA es el copiloto del navegador y debe priorizar consultas buscables
+SYSTEM_PROMPT_BROWSER = """You are the AI copilot of a modern web browser. You help the user navigate, search and discover content.
+
+When you recommend websites, tools, articles or resources, ALWAYS provide recommendations as SEARCH-READY items, not fragile deep links.
+
+- Use markdown links with clear labels: [What to search](https://example.com) as reference if needed
+- Suggest 2-5 concrete options
+- Prefer robust recommendations that can be searched in Google/Bing/DuckDuckGo
+- The browser will convert your recommendations into search result tabs."""
 
 class ChatPanelSafe(BasePanel):
     def __init__(self, parent=None):
@@ -55,16 +68,28 @@ class ChatPanelSafe(BasePanel):
         status_layout.addStretch(1)
         layout.addLayout(status_layout)
 
-        # Context information display
-        context_group = QGroupBox("📄 Page Context Information")
+        # Context information display - NUEVO: Ahora con QTextEdit para ver el contenido
+        context_group = QGroupBox("📄 Page Context (This will be sent to AI)")
         context_layout = QVBoxLayout()
-        self.context_info_label = QLabel("No page context information available")
-        self.context_info_label.setObjectName("contextInfo")
-        self.context_info_label.setWordWrap(True)
-        context_layout.addWidget(self.context_info_label)
-        self.refresh_context_btn = QPushButton("🔄 Refresh Context")
-        self.refresh_context_btn.clicked.connect(self.update_context_info)
-        context_layout.addWidget(self.refresh_context_btn)
+
+        # Text edit to show extracted content
+        self.context_display = QTextEdit()
+        self.context_display.setReadOnly(True)
+        self.context_display.setPlaceholderText("Page content will appear here when you click 'Extract Page Content'...")
+        self.context_display.setMaximumHeight(150)
+        context_layout.addWidget(self.context_display)
+
+        # Buttons
+        buttons_layout = QHBoxLayout()
+        self.extract_context_btn = QPushButton("🔄 Extract Page Content")
+        self.extract_context_btn.clicked.connect(self.extract_page_content_now)
+        buttons_layout.addWidget(self.extract_context_btn)
+
+        self.clear_context_btn = QPushButton("🗑️ Clear Context")
+        self.clear_context_btn.clicked.connect(lambda: self.context_display.clear())
+        buttons_layout.addWidget(self.clear_context_btn)
+
+        context_layout.addLayout(buttons_layout)
         context_group.setLayout(context_layout)
         layout.addWidget(context_group)
 
@@ -90,7 +115,10 @@ class ChatPanelSafe(BasePanel):
         # --- Input area: QTextEdit grande encima, botones debajo ---
         self.message_input = QTextEdit()
         self.message_input.setObjectName("chatInput")
-        self.message_input.setPlaceholderText("Write your message here...")
+        self.message_input.setPlaceholderText(
+            "Pregunta lo que quieras, pide recomendaciones o di «ábreme Skyscanner» o «busca vuelos a Barcelona»… "
+            "La IA te responderá y podrás abrir sus enlaces en pestañas con un clic."
+        )
         self.message_input.setMinimumHeight(60)
         self.message_input.setMaximumHeight(120)
         self.message_input.setAcceptRichText(False)
@@ -388,39 +416,64 @@ Once the model is loaded, the chat will work correctly."""
         if not message:
             QMessageBox.warning(self, "Error", "Please write a message")
             return
-            
+
+        # Get context from the visible display (what user extracted)
+        context = ""
+        if self.context_checkbox.isChecked():
+            context = self.context_display.toPlainText()
+            if not context or context.startswith("❌") or context.startswith("⏳"):
+                # No valid context extracted
+                self.add_message_to_chat("System", "⚠️ Warning: Context checkbox is enabled but no page content extracted. Click 'Extract Page Content' first.", "error")
+                context = ""
+
+        # Add user message to chat
+        self.add_message_to_chat("User", message, "user")
+
+        # Comandos interactivos del navegador (funcionan incluso sin servidor LLM)
+        if self._try_handle_browser_command(message):
+            self.message_input.clear()
+            return
+
         if not self.server_url:
             QMessageBox.warning(self, "Error", "Please configure the server URL first")
             return
-            
-        # Get current page context using the new function
-        context = self.get_current_context()
-        
-        # Add user message to chat
-        self.add_message_to_chat("User", message, "user")
-        
+
         # Clear input
         self.message_input.clear()
-        
+
         # Disable send button while processing
         self.send_btn.setEnabled(False)
         self.send_btn.setText("⏳ Processing...")
-        
+
         try:
+            # Build messages array
+            messages = []
+
+            # If we have context, include it EXPLICITLY in user message
+            if context:
+                user_content = f"""I'm viewing a web page. Here's the page content:
+
+{context}
+
+---
+
+Based on this page content, {message}"""
+
+                self.add_message_to_chat("System", f"📄 Sending page context ({len(context)} chars) to AI", "assistant")
+            else:
+                user_content = message
+
+            # Mensajes con system prompt: la IA actúa como copiloto del navegador y recomienda enlaces
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT_BROWSER},
+                {"role": "user", "content": user_content}
+            ]
+
             # Prepare payload
             payload = {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": f"You are a helpful assistant. Additional context: {context}"
-                    },
-                    {
-                        "role": "user", 
-                        "content": message
-                    }
-                ],
+                "messages": messages,
                 "temperature": 0.7,
-                "max_tokens": 1000,
+                "max_tokens": 2000,
                 "stream": False
             }
             
@@ -455,6 +508,189 @@ Once the model is loaded, the chat will work correctly."""
             # Re-enable send button
             self.send_btn.setEnabled(True)
             self.send_btn.setText("📤 Send")
+
+    def _try_handle_browser_command(self, message):
+        """
+        Ejecuta acciones directas del navegador desde lenguaje natural:
+        - "busca ...": abre búsqueda en nueva pestaña
+        - "abre ...": abre URL(s)/dominios o una búsqueda si no hay URL
+        """
+        text = (message or "").strip()
+        lower = text.lower().strip()
+
+        # Normalizar acentos para detectar comandos robustamente (busca/busqueda/abrir/etc.)
+        normalized = (
+            lower.replace("á", "a")
+                 .replace("é", "e")
+                 .replace("í", "i")
+                 .replace("ó", "o")
+                 .replace("ú", "u")
+        )
+
+        # Buscar en la web (acepta frases como "por favor buscame X")
+        search_match = re.search(
+            r"\b(?:busca(?:me|r)?|search|find)\b\s+(.+)$",
+            normalized,
+            flags=re.IGNORECASE
+        )
+        if search_match:
+            start_idx = search_match.start(1)
+            query = text[start_idx:].strip(" .,:;!?")
+            if not query:
+                self.add_message_to_chat("System", "Escribe qué quieres buscar. Ejemplo: \"busca vuelos baratos a Tokio\"", "error")
+                return True
+            opened_url = self._open_best_result_from_query(query)
+            if opened_url:
+                self.add_message_to_chat("IA", f"🚀 He abierto el mejor resultado web para: **{query}**\n\n[{opened_url}]({opened_url})", "assistant")
+            else:
+                search_url = self._build_search_url(query)
+                self._open_url_in_browser(search_url)
+                self.add_message_to_chat("IA", f"🔎 No pude resolver resultado directo. Abrí la búsqueda para: **{query}**\n\n[{search_url}]({search_url})", "assistant")
+            return True
+
+        # Abrir web(s) (acepta "abre", "abrir", "open", incluso dentro de frase)
+        open_match = re.search(
+            r"\b(?:abre|abrir|open)\b\s+(.+)$",
+            normalized,
+            flags=re.IGNORECASE
+        )
+        if open_match:
+            start_idx = open_match.start(1)
+            target = text[start_idx:].strip(" .,:;!?")
+            if not target:
+                self.add_message_to_chat("System", "Indica qué quieres abrir. Ejemplo: \"abre github.com\"", "error")
+                return True
+
+            links = self._extract_urls_from_message(target)
+            urls = [u[0] for u in links]
+
+            # Si no hay URL explícita, intentar detectar dominios sueltos
+            if not urls:
+                domains = re.findall(r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b', target)
+                for d in domains:
+                    urls.append(f"https://{d}")
+
+            # Si sigue sin haber URLs, abrir una búsqueda con el texto objetivo
+            if not urls:
+                opened_url = self._open_best_result_from_query(target)
+                if opened_url:
+                    self.add_message_to_chat("IA", f"🚀 No detecté URL exacta, abrí el mejor resultado para: **{target}**\n\n[{opened_url}]({opened_url})", "assistant")
+                else:
+                    search_url = self._build_search_url(target)
+                    self._open_url_in_browser(search_url)
+                    self.add_message_to_chat("IA", f"📂 No detecté una URL exacta, así que abrí una búsqueda para: **{target}**\n\n[{search_url}]({search_url})", "assistant")
+                return True
+
+            self._open_urls_in_browser(urls)
+            self.add_message_to_chat("IA", f"🚀 He abierto {len(urls)} pestaña(s) en el navegador.", "assistant")
+            return True
+
+        return False
+
+    def _build_search_url(self, query):
+        """Construye URL de búsqueda usando el motor predeterminado si existe."""
+        q = quote_plus(query)
+        main = self.window()
+        try:
+            if hasattr(main, 'search_engine_manager') and main.search_engine_manager:
+                default_engine = main.search_engine_manager.get_default_engine()
+                engine_id = getattr(default_engine, "id", "duckduckgo")
+                if engine_id == "google":
+                    return f"https://www.google.com/search?q={q}"
+                if engine_id == "bing":
+                    return f"https://www.bing.com/search?q={q}"
+                return f"https://duckduckgo.com/?q={q}"
+        except Exception:
+            pass
+        return f"https://duckduckgo.com/?q={q}"
+
+    def _get_search_engine_name(self):
+        """Obtiene nombre legible del buscador activo."""
+        main = self.window()
+        try:
+            if hasattr(main, 'search_engine_manager') and main.search_engine_manager:
+                default_engine = main.search_engine_manager.get_default_engine()
+                engine_id = getattr(default_engine, "id", "duckduckgo")
+                if engine_id == "google":
+                    return "Google"
+                if engine_id == "bing":
+                    return "Bing"
+                return "DuckDuckGo"
+        except Exception:
+            pass
+        return "DuckDuckGo"
+
+    def _get_search_engine_id(self):
+        """Obtiene id interno del buscador activo."""
+        main = self.window()
+        try:
+            if hasattr(main, 'search_engine_manager') and main.search_engine_manager:
+                default_engine = main.search_engine_manager.get_default_engine()
+                return getattr(default_engine, "id", "duckduckgo")
+        except Exception:
+            pass
+        return "duckduckgo"
+
+    def _open_best_result_from_query(self, query):
+        """
+        Resuelve una consulta al primer resultado web y lo abre automáticamente.
+        Devuelve la URL abierta o None.
+        """
+        direct_url = self._resolve_first_result_url(query)
+        if direct_url:
+            self._open_url_in_browser(direct_url)
+            return direct_url
+        return None
+
+    def _resolve_first_result_url(self, query):
+        """
+        Intenta resolver la consulta a la primera URL real del buscador seleccionado.
+        Fallback: None.
+        """
+        search_url = self._build_search_url(query)
+        engine_id = self._get_search_engine_id()
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            )
+        }
+
+        try:
+            resp = requests.get(search_url, headers=headers, timeout=10)
+            if resp.status_code != 200 or not resp.text:
+                return None
+            html = resp.text
+
+            # Bing parser
+            if engine_id == "bing":
+                m = re.search(r'<li class="b_algo".*?<h2><a href="(https?://[^"]+)"', html, re.DOTALL)
+                if m:
+                    return m.group(1)
+
+            # Google parser (frágil por cambios, pero útil como intento)
+            if engine_id == "google":
+                m = re.search(r'/url\\?q=(https?[^&"]+)&', html)
+                if m:
+                    return unquote(m.group(1))
+
+            # DuckDuckGo parser
+            m = re.search(r'class="result__a"[^>]*href="([^"]+)"', html)
+            if m:
+                href = m.group(1)
+                # Puede venir redirect /l/?uddg=...
+                if "duckduckgo.com/l/?" in href or href.startswith("/l/?"):
+                    parsed = urlparse(href if href.startswith("http") else f"https://duckduckgo.com{href}")
+                    uddg = parse_qs(parsed.query).get("uddg", [])
+                    if uddg:
+                        return unquote(uddg[0])
+                if href.startswith("http"):
+                    return href
+
+        except Exception:
+            return None
+
+        return None
         
     def format_ai_response(self, text):
         """
@@ -581,6 +817,15 @@ Once the model is loaded, the chat will work correctly."""
         msg_label.setMinimumHeight(20)  # Reasonable minimum height
         msg_label.adjustSize()  # Adjust to content
         bubble_layout.addWidget(msg_label)
+
+        # Si la IA devuelve recomendaciones, abrirlas como búsquedas en el motor elegido
+        if message_type == "assistant":
+            search_links = self._extract_search_links_from_message(message)
+            if search_links:
+                # Abrir automáticamente páginas web reales (no solo SERP) con límite para evitar spam
+                self._auto_open_recommendations(search_links, max_auto_open=3)
+                self._add_recommendation_cards(bubble_layout, search_links)
+
         self.chat_messages_layout.addWidget(bubble)
         
         # Force layout and scroll update
@@ -590,6 +835,178 @@ Once the model is loaded, the chat will work correctly."""
         # Auto-scroll to end with a small delay to allow layout to update
         QTimer.singleShot(10, lambda: self.chat_scroll.verticalScrollBar().setValue(
             self.chat_scroll.verticalScrollBar().maximum()))
+
+    def _extract_urls_from_message(self, text):
+        """Extrae URLs de la respuesta de la IA: markdown [texto](url) y URLs planas."""
+        if not text:
+            return []
+        urls = []
+        # Enlaces markdown [texto](url)
+        for m in re.finditer(r'\[([^\]]*)\]\((https?://[^\)\s]+)\)', text):
+            url = m.group(2).rstrip('.,;:!?)')
+            title = (m.group(1).strip() or None)
+            if url and url not in [u[0] for u in urls]:
+                urls.append((url, title))
+        # URLs planas no capturadas ya
+        for m in re.finditer(r'https?://[^\s\)\]\>\"]+', text):
+            url = m.group(0).rstrip('.,;:!?)')
+            if not any(u[0] == url for u in urls):
+                urls.append((url, None))
+        return urls[:10]  # Máximo 10 para no saturar la UI
+
+    def _extract_search_links_from_message(self, text):
+        """
+        Convierte recomendaciones de la IA en enlaces de búsqueda robustos.
+        Devuelve lista de tuplas: (search_url, label)
+        """
+        raw_links = self._extract_urls_from_message(text)
+        search_links = []
+        seen = set()
+
+        for url, title in raw_links:
+            query = self._build_search_query_from_recommendation(url, title)
+            if not query:
+                continue
+            search_url = self._build_search_url(query)
+            if search_url in seen:
+                continue
+            seen.add(search_url)
+            label = title or query
+            search_links.append((search_url, label))
+
+        # Si no hay URLs en la respuesta, intentar extraer bullets/textos como consultas
+        if not search_links and text:
+            for line in text.splitlines():
+                line = line.strip(" -•\t")
+                if len(line) < 6:
+                    continue
+                # Evitar párrafos largos
+                if len(line) > 90:
+                    continue
+                query = line
+                search_url = self._build_search_url(query)
+                if search_url in seen:
+                    continue
+                seen.add(search_url)
+                search_links.append((search_url, query))
+                if len(search_links) >= 5:
+                    break
+
+        return search_links[:10]
+
+    def _build_search_query_from_recommendation(self, url, title=None):
+        """Construye una query estable para buscador desde URL/título sugerido por IA."""
+        if title and title.strip():
+            return title.strip()
+
+        clean = re.sub(r'^https?://', '', (url or '').strip(), flags=re.IGNORECASE)
+        clean = clean.split('#')[0].split('?')[0]
+        parts = [p for p in clean.split('/') if p]
+        if not parts:
+            return ""
+        domain = parts[0].replace("www.", "")
+        path = " ".join(parts[1:3]) if len(parts) > 1 else ""
+        path = path.replace('-', ' ').replace('_', ' ')
+        query = f"{domain} {path}".strip()
+        return query[:120]
+
+    def _add_recommendation_cards(self, parent_layout, urls):
+        """Añade tarjetas para abrir resultados de búsqueda en pestañas."""
+        rec_frame = QFrame()
+        rec_frame.setObjectName("recommendationCards")
+        rec_layout = QVBoxLayout(rec_frame)
+        rec_layout.setContentsMargins(8, 10, 8, 4)
+        rec_layout.setSpacing(8)
+
+        rec_label = QLabel(f"🔎 <b>Abrir búsqueda en {self._get_search_engine_name()}</b>")
+        rec_label.setStyleSheet("color: #1a73e8; font-size: 12px;")
+        rec_label.setTextFormat(Qt.RichText)
+        rec_layout.addWidget(rec_label)
+
+        # Fila de botones por enlace
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(6)
+        for url, title in urls:
+            label = (title or url)
+            if len(label) > 45:
+                label = label[:42] + "..."
+            btn = QPushButton(f"🔎 {label}")
+            btn.setToolTip(url)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(26, 115, 232, 0.12);
+                    color: #1a73e8; border: 1px solid rgba(26, 115, 232, 0.4);
+                    border-radius: 6px; padding: 6px 12px; font-size: 12px;
+                    text-align: left; max-width: 220px;
+                }
+                QPushButton:hover {
+                    background: rgba(26, 115, 232, 0.25);
+                    border-color: #1a73e8;
+                }
+            """)
+            btn.clicked.connect(lambda checked, u=url: self._open_url_in_browser(u))
+            buttons_row.addWidget(btn)
+        buttons_row.addStretch(1)
+        rec_layout.addLayout(buttons_row)
+
+        if len(urls) > 1:
+            open_all_btn = QPushButton(f"🔎 Abrir todas en {self._get_search_engine_name()}")
+            open_all_btn.setCursor(Qt.PointingHandCursor)
+            open_all_btn.setStyleSheet("""
+                QPushButton {
+                    background: #1a73e8; color: white; border: none;
+                    border-radius: 6px; padding: 8px 14px; font-size: 12px; font-weight: bold;
+                }
+                QPushButton:hover { background: #1557b0; }
+            """)
+            open_all_btn.clicked.connect(lambda: self._open_urls_in_browser([u[0] for u in urls]))
+            rec_layout.addWidget(open_all_btn)
+
+        rec_frame.setStyleSheet("""
+            QFrame#recommendationCards {
+                background: rgba(26, 115, 232, 0.06);
+                border: 1px solid rgba(26, 115, 232, 0.2);
+                border-radius: 8px;
+            }
+        """)
+        parent_layout.addWidget(rec_frame)
+
+    def _auto_open_recommendations(self, search_links, max_auto_open=3):
+        """
+        Abre automáticamente resultados web reales desde recomendaciones de búsqueda.
+        search_links: [(search_url, label), ...]
+        """
+        opened = 0
+        for search_url, label in search_links:
+            if opened >= max_auto_open:
+                break
+            query = (label or "").strip()
+            if not query:
+                # fallback: usar q de la URL
+                try:
+                    parsed = urlparse(search_url)
+                    q = parse_qs(parsed.query).get("q", [""])[0]
+                    query = unquote(q)
+                except Exception:
+                    query = ""
+            if not query:
+                continue
+            direct = self._resolve_first_result_url(query)
+            if direct:
+                self._open_url_in_browser(direct)
+                opened += 1
+
+    def _open_url_in_browser(self, url):
+        """Abre una URL en una nueva pestaña del navegador."""
+        main = self.window()
+        if hasattr(main, 'tab_manager') and main.tab_manager:
+            main.tab_manager.add_new_tab(url)
+
+    def _open_urls_in_browser(self, urls):
+        """Abre varias URLs en pestañas nuevas."""
+        for url in urls:
+            self._open_url_in_browser(url)
 
     def clear_chat(self):
         """Clear chat area"""
@@ -665,69 +1082,129 @@ Once the model is loaded, the chat will work correctly."""
             print(f"Error saving configuration: {e}") 
 
     def update_context_info(self):
-        """Updates the current page context information"""
-        try:
-            main_window = self.window()
-            if hasattr(main_window, 'tab_manager'):
-                current_tab = main_window.tab_manager.tabs.currentWidget()
-                if current_tab:
-                    current_url = current_tab.url().toString()
-                    current_title = current_tab.page().title()
-                    
-                    # Format context information
-                    context_text = f"""
-<b>📄 Current Page:</b>
-• <b>Title:</b> {current_title}
-• <b>URL:</b> {current_url}
-• <b>Status:</b> {'✅ Context active' if self.context_checkbox.isChecked() else '❌ Context inactive'}
-                    """
-                    
-                    self.context_info_label.setText(context_text)
-                    # No apply inline styles - use objectName for QSS
-                else:
-                    self.context_info_label.setText("No active tab")
-                    # No apply inline styles - use objectName for QSS
-            else:
-                self.context_info_label.setText("Cannot access tab manager")
-                # No apply inline styles - use objectName for QSS
-        except Exception as e:
-            self.context_info_label.setText(f"Error getting context: {str(e)}")
-            # No apply inline styles - use objectName for QSS
+        """DEPRECATED - Trigger extraction instead"""
+        # Now we just trigger the extraction
+        self.extract_page_content_now()
     
     def on_context_toggled(self, checked):
         """Callback when context is toggled"""
         if checked:
-            # No apply inline styles - use objectName for QSS
-            # Update text to show it's active
-            current_text = self.context_info_label.text()
-            if "Status:" in current_text:
-                current_text = current_text.replace("❌ Context inactive", "✅ Context active")
-                self.context_info_label.setText(current_text)
+            # Show message suggesting to extract content
+            if not self.context_display.toPlainText() or self.context_display.toPlainText().startswith("Page content"):
+                self.add_message_to_chat("System", "💡 Tip: Click 'Extract Page Content' to load the current page's content", "assistant")
         else:
-            # No apply inline styles - use objectName for QSS
-            # Update text to show it's inactive
-            current_text = self.context_info_label.text()
-            if "Status:" in current_text:
-                current_text = current_text.replace("✅ Context active", "❌ Context inactive")
-                self.context_info_label.setText(current_text)
+            self.add_message_to_chat("System", "ℹ️ Page context disabled - AI will not receive page content", "assistant")
     
-    def get_current_context(self):
-        """Gets the current page context"""
-        if not self.context_checkbox.isChecked():
-            return ""
-            
+    def extract_page_content_now(self):
+        """Extract page content and display it - SIMPLE VERSION"""
         try:
+            # Show loading message
+            self.context_display.setPlainText("⏳ Extracting page content...")
+            self.extract_context_btn.setEnabled(False)
+
+            # Get current tab
             main_window = self.window()
-            if hasattr(main_window, 'tab_manager'):
-                current_tab = main_window.tab_manager.tabs.currentWidget()
-                if current_tab:
-                    current_url = current_tab.url().toString()
-                    current_title = current_tab.page().title()
-                    return f"Context: User browsing '{current_title}' ({current_url})"
-                else:
-                    return "Context: User browsing the web browser"
-            else:
-                return "Context: User browsing the web browser"
+            if not hasattr(main_window, 'tab_manager'):
+                self.context_display.setPlainText("❌ Error: Cannot access tab manager")
+                self.extract_context_btn.setEnabled(True)
+                return
+
+            current_tab = main_window.tab_manager.tabs.currentWidget()
+            if not current_tab or not hasattr(current_tab, 'page'):
+                self.context_display.setPlainText("❌ Error: No active tab")
+                self.extract_context_btn.setEnabled(True)
+                return
+
+            # Get URL and title
+            current_url = current_tab.url().toString()
+            current_title = current_tab.page().title()
+
+            # Request HTML
+            def on_html_received(html):
+                try:
+                    # Extract text content
+                    extracted_text = self._simple_extract_text(html, current_url, current_title)
+
+                    # Display in text edit
+                    self.context_display.setPlainText(extracted_text)
+
+                    # Add success message to chat
+                    self.add_message_to_chat("System", f"✅ Page content extracted: {len(extracted_text)} characters", "assistant")
+
+                except Exception as e:
+                    error_msg = f"❌ Error extracting content: {str(e)}"
+                    self.context_display.setPlainText(error_msg)
+                    print(error_msg)
+                    import traceback
+                    traceback.print_exc()
+                finally:
+                    self.extract_context_btn.setEnabled(True)
+
+            # Request HTML asynchronously
+            current_tab.page().toHtml(on_html_received)
+
         except Exception as e:
-            print(f"Error getting page context: {e}")
-            return "Context: User browsing the web browser" 
+            error_msg = f"❌ Error: {str(e)}"
+            self.context_display.setPlainText(error_msg)
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            self.extract_context_btn.setEnabled(True)
+
+    def _simple_extract_text(self, html, url, title):
+        """Simple and effective text extraction"""
+        try:
+            from bs4 import BeautifulSoup
+
+            # Parse HTML
+            soup = BeautifulSoup(html, 'lxml')
+
+            # Remove unwanted elements
+            for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'noscript', 'form']):
+                element.decompose()
+
+            # Get all text
+            text = soup.get_text(separator='\n', strip=True)
+
+            # Clean up
+            lines = []
+            for line in text.split('\n'):
+                line = line.strip()
+                if line and len(line) > 2:  # Skip very short lines
+                    lines.append(line)
+
+            clean_text = '\n'.join(lines)
+
+            # Build context
+            context = f"""PAGE: {title}
+URL: {url}
+
+CONTENT:
+{clean_text[:3000]}
+
+{'[Content truncated - showing first 3000 characters]' if len(clean_text) > 3000 else '[End of content]'}"""
+
+            return context
+
+        except ImportError:
+            # Fallback without BeautifulSoup
+            import re
+            text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+            text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
+            text = re.sub(r'<[^>]+>', '', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+
+            return f"""PAGE: {title}
+URL: {url}
+
+CONTENT:
+{text[:3000]}
+
+{'[Content truncated]' if len(text) > 3000 else '[End]'}"""
+        except Exception as e:
+            return f"Error extracting text: {str(e)}"
+
+    def get_current_context(self):
+        """DEPRECATED - Now using context_display directly"""
+        # This function is kept for compatibility but no longer used
+        return self.context_display.toPlainText() if hasattr(self, 'context_display') else "" 

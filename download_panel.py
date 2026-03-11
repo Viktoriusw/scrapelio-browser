@@ -32,6 +32,10 @@ class DownloadPanel(QWidget):
         super().__init__(parent)
         self.downloads = []  # Lista de (item, widget)
         self.db_path = "downloads_history.db"
+
+        # Diccionario para trackear conexiones de señales y prevenir memory leaks
+        self._signal_connections = {}
+
         self.setup_database()
         self.setup_ui()
         self.load_history()
@@ -77,13 +81,17 @@ class DownloadPanel(QWidget):
         # Botón para limpiar completadas
         self.clear_btn = QPushButton("🗑️ Limpiar completadas")
         self.clear_btn.setToolTip("Eliminar descargas completadas de la lista")
-        self.clear_btn.clicked.connect(self.clear_completed)
+        clear_btn_connection = self.clear_completed
+        self.clear_btn.clicked.connect(clear_btn_connection)
+        self._signal_connections['clear_btn'] = clear_btn_connection
         header_layout.addWidget(self.clear_btn)
 
         # Botón para abrir carpeta de descargas
         self.open_folder_btn = QPushButton("📂 Abrir carpeta")
         self.open_folder_btn.setToolTip("Abrir carpeta de descargas")
-        self.open_folder_btn.clicked.connect(self.open_downloads_folder)
+        open_folder_btn_connection = self.open_downloads_folder
+        self.open_folder_btn.clicked.connect(open_folder_btn_connection)
+        self._signal_connections['open_folder_btn'] = open_folder_btn_connection
         header_layout.addWidget(self.open_folder_btn)
 
         layout.addLayout(header_layout)
@@ -141,9 +149,17 @@ class DownloadPanel(QWidget):
         # Crear widget para la descarga
         download_widget = DownloadItemWidget(download_request, self)
 
-        # Conectar señales
-        download_widget.download_removed.connect(self.remove_download_widget)
-        download_widget.download_finished.connect(self.save_to_history)
+        # Conectar señales y guardar referencias
+        widget_id = id(download_widget)
+        self._signal_connections[widget_id] = {}
+
+        removed_connection = self.remove_download_widget
+        download_widget.download_removed.connect(removed_connection)
+        self._signal_connections[widget_id]['download_removed'] = removed_connection
+
+        finished_connection = self.save_to_history
+        download_widget.download_finished.connect(finished_connection)
+        self._signal_connections[widget_id]['download_finished'] = finished_connection
 
         # Agregar al layout
         self.downloads_layout.insertWidget(0, download_widget)  # Agregar al principio
@@ -154,6 +170,25 @@ class DownloadPanel(QWidget):
     def remove_download_widget(self, widget):
         """Remover widget de descarga"""
         if widget in self.downloads:
+            # Desconectar señales del widget antes de eliminarlo
+            widget_id = id(widget)
+            if widget_id in self._signal_connections:
+                connections = self._signal_connections[widget_id]
+
+                try:
+                    if 'download_removed' in connections:
+                        widget.download_removed.disconnect(connections['download_removed'])
+                except:
+                    pass
+
+                try:
+                    if 'download_finished' in connections:
+                        widget.download_finished.disconnect(connections['download_finished'])
+                except:
+                    pass
+
+                del self._signal_connections[widget_id]
+
             self.downloads.remove(widget)
             self.downloads_layout.removeWidget(widget)
             widget.deleteLater()
@@ -214,6 +249,56 @@ class DownloadPanel(QWidget):
             conn.close()
         except Exception as e:
             print(f"[DownloadPanel] Error loading history: {e}")
+
+    def _disconnect_signals(self):
+        """Desconectar todas las señales para prevenir memory leaks"""
+        try:
+            # Desconectar señales de botones
+            try:
+                if 'clear_btn' in self._signal_connections:
+                    self.clear_btn.clicked.disconnect(self._signal_connections['clear_btn'])
+                    del self._signal_connections['clear_btn']
+            except:
+                pass
+
+            try:
+                if 'open_folder_btn' in self._signal_connections:
+                    self.open_folder_btn.clicked.disconnect(self._signal_connections['open_folder_btn'])
+                    del self._signal_connections['open_folder_btn']
+            except:
+                pass
+
+            # Desconectar señales de widgets de descarga
+            for widget in self.downloads[:]:
+                widget_id = id(widget)
+                if widget_id in self._signal_connections:
+                    connections = self._signal_connections[widget_id]
+
+                    try:
+                        if 'download_removed' in connections:
+                            widget.download_removed.disconnect(connections['download_removed'])
+                    except:
+                        pass
+
+                    try:
+                        if 'download_finished' in connections:
+                            widget.download_finished.disconnect(connections['download_finished'])
+                    except:
+                        pass
+
+                    del self._signal_connections[widget_id]
+
+        except Exception as e:
+            print(f"Error al desconectar señales del DownloadPanel: {str(e)}")
+
+    def closeEvent(self, event):
+        """Manejar cierre del panel"""
+        self._disconnect_signals()
+        super().closeEvent(event)
+
+    def __del__(self):
+        """Destructor del panel"""
+        self._disconnect_signals()
 
 
 class DownloadItemWidget(QWidget):
@@ -347,6 +432,26 @@ class DownloadItemWidget(QWidget):
         """Conectar señales de descarga"""
         self.download.receivedBytesChanged.connect(self.update_progress)
         self.download.stateChanged.connect(self.on_state_changed)
+
+    def disconnect_signals(self):
+        """Desconectar señales para prevenir memory leaks"""
+        try:
+            self.download.receivedBytesChanged.disconnect(self.update_progress)
+        except:
+            pass
+        try:
+            self.download.stateChanged.disconnect(self.on_state_changed)
+        except:
+            pass
+
+    def closeEvent(self, event):
+        """Manejar cierre del widget"""
+        self.disconnect_signals()
+        super().closeEvent(event)
+
+    def __del__(self):
+        """Destructor del widget"""
+        self.disconnect_signals()
 
     def update_progress(self):
         """Actualizar progreso de descarga"""

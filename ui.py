@@ -1,14 +1,15 @@
 from PySide6.QtWidgets import (QMainWindow, QToolBar, QPushButton, QLineEdit, 
                               QDockWidget, QMenu, QMessageBox, QWidget, QVBoxLayout,
                               QSplitter, QFrame, QCheckBox, QTabWidget, QTextEdit,
-                              QHBoxLayout, QLabel, QSpinBox, QComboBox, QStackedWidget)
+                              QHBoxLayout, QLabel, QSpinBox, QComboBox, QStackedWidget,
+                              QListWidget)
 from PySide6.QtCore import Qt, QUrl, QSettings, QSize, QTimer, QThread, Signal
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtGui import QIcon, QPalette, QColor, QAction, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from tabs import TabManager
 from navigation import NavigationManager
-from history import HistoryManager
+from history import HistoryManager, HistoryPanel
 from devtools import DevToolsDock
 from privacy import PrivacyManager
 from favorites_bar import FavoritesBar
@@ -22,6 +23,7 @@ from password_manager import PasswordManager
 from auth_manager import AuthManager
 from auth_panel import LoginDialog, AuthPanel
 import time
+import urllib.parse
 
 # ============================================================================
 # NUEVAS FUNCIONALIDADES UX/UI - Plan de Acción
@@ -33,34 +35,73 @@ from screenshot_tool import ScreenshotTool, ScreenshotDialog
 from profile_manager import ProfileManager, ProfileSwitcher
 from network_interceptor import NetworkInterceptor, NetworkSettingsDialog
 from userscript_manager import UserScriptManager, UserScriptDialog
-from modern_styles import (ThemeManager, CircularButton, ExpandableUrlBar,
-                           TrapezoidalTabBar, RetractableSidebar,
-                           ModernMenuButton, AnimationHelper, apply_shadow_effect)
+from performance_monitor import PerformanceMonitor, PerformanceDiagnostic
+from screenshot_advanced import RegionSelector, AnnotationEditor, ElementSelector
+from session_manager import SessionManager
+from search_engine_manager import SearchEngineManager, SearchEngineButton, SearchEngineSettingsDialog
+from url_autocomplete import UrlAutocompleteSystem
+from homepage_manager import HomepageManager, HomepageSettingsDialog
+
+# Import modern styles adapter
+try:
+    from ui.core.modern_theme_styles import ModernStylesAdapter
+    MODERN_STYLES_AVAILABLE = True
+except ImportError:
+    # Fallback al sistema antiguo
+    try:
+        from modern_styles import ThemeManager as ModernStylesAdapter
+        MODERN_STYLES_AVAILABLE = True
+    except ImportError:
+        MODERN_STYLES_AVAILABLE = False
+        # Dummy class
+        class ModernStylesAdapter:
+            def __init__(self, theme_name='light'):
+                pass
+            def get_tab_style(self):
+                return ""
+            def get_urlbar_style(self):
+                return ""
+            def get_navbar_style(self):
+                return ""
+
+# Import modern widgets
+try:
+    from ui.components.widgets import ExpandableUrlBar, CircularButton
+except ImportError:
+    # Fallback: usar widgets estándar
+    from PySide6.QtWidgets import QLineEdit as ExpandableUrlBar, QPushButton as CircularButton
+    print("[WARNING] Using standard Qt widgets instead of modern widgets")
 
 # Import theme system
 try:
-    from theme_manager import get_theme_manager, get_color, get_font, get_spacing, get_border
+    from ui.core.theme_engine import get_theme_engine as get_theme_manager, get_color, get_font, get_spacing, get_border
     THEME_SYSTEM_AVAILABLE = True
-    print("[OK] Theme system loaded")
-except ImportError as e:
-    THEME_SYSTEM_AVAILABLE = False
-    print(f"[WARNING] Theme system not available: {e}")
-    
-    # Create dummy functions for compatibility
-    def get_theme_manager():
-        return None
-    
-    def get_color(color_key, theme_name=None):
-        return "#000000"
-    
-    def get_font(font_key, theme_name=None):
-        return "10pt"
-    
-    def get_spacing(spacing_key, theme_name=None):
-        return "4px"
-    
-    def get_border(border_key, theme_name=None):
-        return "1px"
+    print("[OK] Theme engine loaded (new unified system)")
+except ImportError:
+    # Fallback al sistema antiguo
+    try:
+        from theme_manager import get_theme_manager, get_color, get_font, get_spacing, get_border
+        THEME_SYSTEM_AVAILABLE = True
+        print("[OK] Theme system loaded (legacy)")
+    except ImportError as e:
+        THEME_SYSTEM_AVAILABLE = False
+        print(f"[WARNING] Theme system not available: {e}")
+        
+        # Create dummy functions for compatibility
+        def get_theme_manager():
+            return None
+        
+        def get_color(color_key, theme_name=None):
+            return "#000000"
+        
+        def get_font(font_key, theme_name=None):
+            return "10pt"
+        
+        def get_spacing(spacing_key, theme_name=None):
+            return "4px"
+        
+        def get_border(border_key, theme_name=None):
+            return "1px"
 
 # ============================================================================
 # LEGACY COMPATIBILITY: Dummy functions for plugins now loaded dynamically
@@ -70,22 +111,6 @@ except ImportError as e:
 # TODO: Remove these once all legacy references are updated.
 
 print("[INFO] Plugins will be loaded dynamically through UnifiedPluginManager")
-
-def ScrapingPanel(*args, **kwargs):
-    """DEPRECATED: Dummy function for compatibility. Use UnifiedPluginManager instead."""
-    return None
-
-def scraping_integration():
-    """DEPRECATED: Dummy function for compatibility. Use UnifiedPluginManager instead."""
-    return None
-
-def PatternDetector():
-    """DEPRECATED: Dummy function for compatibility. Use UnifiedPluginManager instead."""
-    return None
-
-def ProxyPanel(*args, **kwargs):
-    """DEPRECATED: Dummy function for compatibility. Use UnifiedPluginManager instead."""
-    return None
 
 # Plugin availability flags
 # These are set to False initially and will be set to True when plugins are loaded dynamically
@@ -100,6 +125,15 @@ try:
 except ImportError as e:
     CHAT_AVAILABLE = False
     print(f"Warning: AI chat module not available - {e}")
+
+# Import GenTab system (AI-First generative tabs, inspired by Google Disco)
+try:
+    from gentab_panel import GenTabPanel
+    GENTAB_AVAILABLE = True
+    print("[OK] GenTab system loaded correctly")
+except ImportError as e:
+    GENTAB_AVAILABLE = False
+    print(f"Warning: GenTab system not available - {e}")
 
 
 # Import unified plugin system
@@ -204,14 +238,18 @@ class MainWindow(QMainWindow):
         self.network_interceptor = NetworkInterceptor(self)
         print(f"[OK] Network interceptor initialized - UA: {self.network_interceptor.user_agent_type}")
 
+        # 4.1. Configurar User-Agent en el perfil global/predeterminado
+        # Esto asegura que todas las pestañas usen el User-Agent correcto desde el inicio
+        self._configure_default_profile_user_agent()
+
         # 5. UserScript Manager para scripts personalizados
         self.userscript_manager = UserScriptManager(self)
         scripts_count = len(self.userscript_manager.get_all_scripts())
         print(f"[OK] UserScript manager initialized - {scripts_count} scripts loaded")
 
         # 6. Modern Theme Manager para estilos visuales modernos
-        self.theme_manager = ThemeManager('light')  # Tema por defecto: light
-        print(f"[OK] Modern theme manager initialized - Theme: {self.theme_manager.current_theme_name}")
+        self.modern_styles = ModernStylesAdapter('light')  # Tema por defecto: light
+        print(f"[OK] Modern styles adapter initialized")
 
         # Initialize authentication system (SYNCHRONOUS - needed for plugins)
         self.auth_manager = None
@@ -224,6 +262,17 @@ class MainWindow(QMainWindow):
         else:
             print("[WARNING] Authentication system not available")
         
+        # Initialize GenTab panel early (needed by setup_side_strip before setup_dock_widgets)
+        self.gentab_panel = None
+        if GENTAB_AVAILABLE:
+            try:
+                self.gentab_panel = GenTabPanel(self)
+                self.gentab_panel.gentab_created.connect(self._open_gentab_in_new_tab)
+                print("[OK] GenTab panel initialized")
+            except Exception as e:
+                self.gentab_panel = None
+                print(f"[ERROR] Failed to initialize GenTab panel: {e}")
+
         # Initialize unified plugin system (needs auth_manager)
         self.plugin_manager = None
         self.dynamic_plugin_actions = {}  # Para guardar acciones de plugins dinámicos
@@ -238,11 +287,31 @@ class MainWindow(QMainWindow):
                 self.plugin_manager.plugin_unloaded.connect(self.on_plugin_unloaded)
                 
                 print("[OK] Unified Plugin system initialized with auth")
+                
+                # Cargar plugins gratuitos inmediatamente (sin necesidad de autenticación)
+                QTimer.singleShot(1000, self._load_free_plugins)
+                
             except Exception as e:
                 print(f"[ERROR] Failed to initialize plugin system: {e}")
         else:
             print("[WARNING] Plugin system not available or auth_manager missing")
         
+        # Search Engine Manager (ANTES de crear la barra de navegación)
+        try:
+            self.search_engine_manager = SearchEngineManager(self)
+            print("[OK] Search Engine Manager initialized")
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize Search Engine Manager: {e}")
+            self.search_engine_manager = None
+
+        # Homepage Manager (DESPUÉS del SearchEngineManager)
+        try:
+            self.homepage_manager = HomepageManager(self)
+            print("[OK] Homepage Manager initialized")
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize Homepage Manager: {e}")
+            self.homepage_manager = None
+
         # Crear la barra de navegación después de tener navigation_manager
         self.nav_bar = QToolBar("Navigation")
         self.setup_nav_bar()
@@ -258,10 +327,25 @@ class MainWindow(QMainWindow):
         # Crear splitter horizontal REDIMENSIONABLE pero con barra lateral fija
         content_splitter = QSplitter(Qt.Horizontal)
         content_splitter.setChildrenCollapsible(False)  # No permitir colapsar completamente
+        # Eliminar el handle visible del splitter para el sidebar
+        content_splitter.setHandleWidth(0)
+        content_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: transparent;
+                border: none;
+            }
+        """)
         
         # Crear contenedor para la barra lateral IZQUIERDA (NO redimensionable)
         self.sidebar_container = QWidget()
         self.sidebar_container.setFixedWidth(36)  # Ancho reducido para iconos más pequeños
+        # Eliminar borde del sidebar
+        self.sidebar_container.setStyleSheet("""
+            QWidget {
+                border: none;
+                background: transparent;
+            }
+        """)
         sidebar_layout = QVBoxLayout(self.sidebar_container)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
@@ -289,7 +373,7 @@ class MainWindow(QMainWindow):
         content_splitter.addWidget(self.tab_manager.tabs)
 
         # Aplicar estilo trapezoidal moderno a las pestañas
-        tab_style = self.theme_manager.get_tab_style()
+        tab_style = self.modern_styles.get_tab_style()
         self.tab_manager.tabs.setStyleSheet(tab_style)
         self.tab_manager.tabs.setDocumentMode(True)  # Pestañas integradas
         self.tab_manager.tabs.setTabsClosable(True)  # Botón X en pestañas
@@ -313,10 +397,6 @@ class MainWindow(QMainWindow):
         self.setup_theme()
         self.setup_shortcuts()
         
-        # Aplicar tema después de que todos los widgets estén creados
-        # Usar siempre el sistema legacy para evitar dependencias del plugin
-        self._load_legacy_theme()
-        
         # Initialize authentication UI state first
         self.update_auth_ui()
         
@@ -335,7 +415,7 @@ class MainWindow(QMainWindow):
         if not session_restored or self.tab_manager.tabs.count() == 0:
             print("Creating initial tab...")
             self.tab_manager.add_new_tab()
-
+        
         # Conectar señales de cambio de pestaña al status bar
         self.tab_manager.tabs.currentChanged.connect(self._connect_browser_to_statusbar)
 
@@ -447,7 +527,27 @@ class MainWindow(QMainWindow):
             self.chat_panel = None
             self.chat_dock = None
             print("[ERROR] AI chat panel not available")
-        
+
+        # GenTab Panel ya inicializado en __init__ (antes de setup_side_strip)
+
+        # Configurar Tab Groups Panel
+        try:
+            from tab_groups_ui import TabGroupsPanel
+            self.tab_groups_panel = TabGroupsPanel(
+                group_manager=self.tab_manager.group_manager,
+                tab_manager=self.tab_manager
+            )
+            self.tab_groups_dock = QDockWidget("📑 Tab Groups", self)
+            self.tab_groups_dock.setWidget(self.tab_groups_panel)
+            self.tab_groups_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+            self.addDockWidget(Qt.RightDockWidgetArea, self.tab_groups_dock)
+            self.tab_groups_dock.hide()
+            print("[OK] Tab Groups panel configured correctly")
+        except Exception as e:
+            self.tab_groups_panel = None
+            self.tab_groups_dock = None
+            print(f"[ERROR] Tab Groups panel not available: {e}")
+
         # SEO Analyzer Plugin - NOW LOADED DYNAMICALLY through UnifiedPluginManager
         # (Removed static initialization)
         
@@ -544,6 +644,10 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F11"), self).activated.connect(
             self.toggle_fullscreen)
         
+        # GenTab (Ctrl+G)
+        QShortcut(QKeySequence("Ctrl+G"), self).activated.connect(
+            self.toggle_gentab_panel)
+
         # DevTools
         QShortcut(QKeySequence("F12"), self).activated.connect(
             self.toggle_dev_tools)
@@ -575,6 +679,11 @@ class MainWindow(QMainWindow):
                 # shutdown_all_plugins() no existe en UnifiedPluginManager
                 # La limpieza se hace automáticamente en el destructor
             
+            # Session Manager - guardar para recuperación de crash
+            if hasattr(self, 'session_manager') and self.session_manager:
+                print("[Browser] Saving session for crash recovery...")
+                self.session_manager.on_browser_close()
+            
             # Save session only if user is authenticated
             if hasattr(self, 'tab_manager'):
                 if self.auth_manager and self.auth_manager.auth_state.is_authenticated:
@@ -589,36 +698,85 @@ class MainWindow(QMainWindow):
             print(f"[Browser] Error during shutdown: {e}")
             event.accept()
 
+    def resizeEvent(self, event):
+        """
+        Manejar el redimensionamiento de la ventana para ocultar/mostrar elementos
+        de la barra de navegación según el espacio disponible.
+        """
+        super().resizeEvent(event)
+
+        # Obtener ancho actual de la ventana
+        window_width = self.width()
+
+        # Definir umbrales de ancho
+        WIDTH_FULL = 1200      # Ancho completo - todos los elementos visibles
+        WIDTH_MEDIUM = 950     # Ancho medio - ocultar tab_search
+        WIDTH_SMALL = 750      # Ancho pequeño - ocultar más elementos
+        WIDTH_MINIMAL = 600    # Ancho mínimo - solo esenciales
+
+        try:
+            # Gestión responsive de elementos secundarios
+            if window_width >= WIDTH_FULL:
+                # ✅ ANCHO COMPLETO: Mostrar todo
+                if hasattr(self, 'tab_search'):
+                    self.tab_search.show()
+                if hasattr(self, 'url_separator'):
+                    self.url_separator.show()
+                if hasattr(self, 'profile_switcher'):
+                    self.profile_switcher.show()
+                if hasattr(self, 'search_engine_button'):
+                    self.search_engine_button.show()
+
+            elif window_width >= WIDTH_MEDIUM:
+                # ⚠️ ANCHO MEDIO: Ocultar tab_search
+                if hasattr(self, 'tab_search'):
+                    self.tab_search.hide()
+                if hasattr(self, 'url_separator'):
+                    self.url_separator.hide()
+                if hasattr(self, 'profile_switcher'):
+                    self.profile_switcher.show()
+                if hasattr(self, 'search_engine_button'):
+                    self.search_engine_button.show()
+
+            elif window_width >= WIDTH_SMALL:
+                # ⚠️ ANCHO PEQUEÑO: Ocultar tab_search y profile_switcher
+                if hasattr(self, 'tab_search'):
+                    self.tab_search.hide()
+                if hasattr(self, 'url_separator'):
+                    self.url_separator.hide()
+                if hasattr(self, 'profile_switcher'):
+                    self.profile_switcher.hide()
+                if hasattr(self, 'search_engine_button'):
+                    self.search_engine_button.show()
+
+            else:
+                # 🔴 ANCHO MÍNIMO: Solo esenciales (URL bar, menú, login)
+                if hasattr(self, 'tab_search'):
+                    self.tab_search.hide()
+                if hasattr(self, 'url_separator'):
+                    self.url_separator.hide()
+                if hasattr(self, 'profile_switcher'):
+                    self.profile_switcher.hide()
+                if hasattr(self, 'search_engine_button'):
+                    self.search_engine_button.hide()
+
+        except Exception as e:
+            print(f"[UI] Error in resizeEvent: {e}")
+
     def setup_nav_bar(self):
         # Configurar toolbar moderno con constantes uniformes
         self.nav_bar.setIconSize(self.ICON_18)
         self.nav_bar.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self.nav_bar.setObjectName("navbar")
+        self.nav_bar.setObjectName("navigationBar")
+
+        # IMPORTANTE: Evitar que el toolbar se envuelva (wrap) a múltiples líneas
+        self.nav_bar.setMovable(False)
+        self.nav_bar.setFloatable(False)
 
         # Aplicar estilo moderno del theme manager
-        modern_navbar_style = self.theme_manager.get_navbar_style()
-        circular_btn_style = self.theme_manager.get_circular_button_style()
+        # Aplicar estilo moderno del theme manager
+        self.nav_bar.setStyleSheet(self.modern_styles.get_navbar_style())
 
-        combined_style = modern_navbar_style + """
-            QToolButton {
-                width: 36px;
-                height: 36px;
-                padding: 0px;
-                margin: 0px;
-                border: none;
-                border-radius: 18px;
-            }
-            QToolButton:hover {
-                background-color: rgba(0, 0, 0, 0.05);
-                border-radius: 18px;
-            }
-            QToolButton:pressed {
-                background-color: rgba(0, 0, 0, 0.1);
-                border-radius: 18px;
-            }
-        """
-
-        self.nav_bar.setStyleSheet(combined_style)
         
         # Toggle Sidebar Button - Agregado justo antes de Back/Forward
         self.sidebar_visible = True  # Estado inicial: visible
@@ -651,42 +809,68 @@ class MainWindow(QMainWindow):
         history_action.triggered.connect(lambda: self.history_manager.show_history(self.tab_manager))
         self.nav_bar.addAction(history_action)
 
-        # URL Bar expandible estilo Chrome
+        # Search Engine Button (antes de la URL bar)
+        if hasattr(self, 'search_engine_manager') and self.search_engine_manager:
+            self.search_engine_button = SearchEngineButton(self.search_engine_manager, self)
+            self.search_engine_button.engine_selected.connect(self.on_search_engine_selected)
+            self.nav_bar.addWidget(self.search_engine_button)
+            self.selected_search_engine = None  # Para búsquedas temporales
+        
+        # URL Bar expandible estilo Chrome - PRIORIDAD MÁXIMA
         self.url_bar = ExpandableUrlBar()
+        self.url_bar.setObjectName("urlBar")
         self.url_bar.returnPressed.connect(lambda: self.load_url(self.url_bar.text()))
         self.url_bar.setFixedHeight(36)
+        # ✅ CRÍTICO: Establecer anchos para evitar overflow
+        self.url_bar.setMinimumWidth(250)  # Mínimo 250px - siempre visible
+        self.url_bar.setMaximumWidth(600)  # Máximo 600px - evitar expansión excesiva
+        self.url_bar.setPlaceholderText("Buscar o escribir URL...")
 
         # Aplicar estilo moderno al URL bar
-        urlbar_style = self.theme_manager.get_urlbar_style()
+        urlbar_style = self.modern_styles.get_urlbar_style()
         self.url_bar.setStyleSheet(urlbar_style)
 
         # Habilitar botón de limpiar si está disponible
         if hasattr(self.url_bar, "setClearButtonEnabled"):
             self.url_bar.setClearButtonEnabled(True)
 
+        # Inicializar sistema de autocompletado inteligente
+        try:
+            self.autocomplete_system = UrlAutocompleteSystem(
+                url_bar=self.url_bar,
+                history_manager=self.history_manager,
+                parent=self
+            )
+            self.autocomplete_system.suggestion_selected.connect(self.load_url)
+            print("[OK] URL Autocomplete system initialized")
+        except Exception as e:
+            print(f"[WARNING] Failed to initialize autocomplete system: {e}")
+            self.autocomplete_system = None
+
         self.nav_bar.addWidget(self.url_bar)
 
         # Separador visual entre URL bar y tab search
-        url_separator = QFrame()
-        url_separator.setFrameShape(QFrame.VLine)
-        url_separator.setFrameShadow(QFrame.Sunken)
-        url_separator.setMaximumWidth(1)
+        self.url_separator = QFrame()
+        self.url_separator.setFrameShape(QFrame.VLine)
+        self.url_separator.setFrameShadow(QFrame.Sunken)
+        self.url_separator.setMaximumWidth(1)
         # El color del separador se maneja por el tema JSON
-        self.nav_bar.addWidget(url_separator)
+        self.nav_bar.addWidget(self.url_separator)
 
         # Solo guardar referencia de las acciones para aplicar iconos después
         self.function_actions = {}
 
-        # Campo de búsqueda de pestañas con tamaño balanceado
+        # Campo de búsqueda de pestañas - PUEDE OCULTARSE en ventanas pequeñas
         self.tab_search = QLineEdit()
         self.tab_search.setPlaceholderText("Search tabs...")
-        self.tab_search.setMinimumWidth(200)  # Aumentado para mejor coherencia
-        self.tab_search.setMaximumWidth(350)  # Límite máximo más generoso
-        self.tab_search.setFixedHeight(36)  # Ajustado para coincidir con botones del sidebar
+        # ✅ CRÍTICO: Reducir ancho mínimo para evitar overflow
+        self.tab_search.setMinimumWidth(100)  # Reducido de 200 a 100
+        self.tab_search.setMaximumWidth(250)  # Reducido de 350 a 250
+        self.tab_search.setFixedHeight(36)
         self.tab_search.textChanged.connect(self.tab_manager.buscar_pestanas)
         self.nav_bar.addWidget(self.tab_search)
 
-        # Profile Switcher
+        # Profile Switcher - PUEDE OCULTARSE en ventanas pequeñas
         self.profile_switcher = ProfileSwitcher(self.profile_manager, self)
         self.nav_bar.addWidget(self.profile_switcher)
 
@@ -748,6 +932,8 @@ class MainWindow(QMainWindow):
             QToolBar {
                 spacing: 2px;
                 padding: 0px;
+                border: none;
+                background: transparent;
             }
             QToolButton {
                 width: 36px;
@@ -797,10 +983,22 @@ class MainWindow(QMainWindow):
             self.side_strip.addAction(self.proxy_action)
         
         if CHAT_AVAILABLE:
-            self.chat_action = create_strip_action('icons/chat.png', 'Chat IA', 
+            self.chat_action = create_strip_action('icons/chat.png', 'Chat IA',
                                                  self.toggle_chat_panel)
             self.side_strip.addAction(self.chat_action)
-        
+
+        # GenTab (Pestañas Generativas)
+        if GENTAB_AVAILABLE and self.gentab_panel:
+            self.gentab_action = create_strip_action('icons/new-tab.png', 'GenTab ✨',
+                                                    self.toggle_gentab_panel)
+            self.side_strip.addAction(self.gentab_action)
+
+        # Tab Groups Panel
+        if hasattr(self, 'tab_groups_panel') and self.tab_groups_panel:
+            self.tab_groups_action = create_strip_action('icons/bookmark.png', 'Tab Groups',
+                                                       self.toggle_tab_groups_panel)
+            self.side_strip.addAction(self.tab_groups_action)
+
         # SEO Analyzer - NOW LOADED DYNAMICALLY
         # (Button will be added automatically by UnifiedPluginManager when plugin is installed)
         
@@ -1047,35 +1245,67 @@ class MainWindow(QMainWindow):
     # Métodos del botón de favorito no implementados
 
     def load_url(self, url):
-        """Load a URL or perform a search on DuckDuckGo"""
+        """Load a URL or perform a search using the configured search engine"""
         try:
             url = url.strip()
-            # Si es una URL válida, navega directo
-            if url.startswith(('http://', 'https://')) or ('.' in url and ' ' not in url):
-                final_url = url if url.startswith(('http://', 'https://')) else 'https://' + url
-            else:
-                # Si no es URL, realiza búsqueda en DuckDuckGo
-                query = urllib.parse.quote(url)
-                final_url = f'https://duckduckgo.com/?q={query}'
             
-            # Crear una nueva pestaña
-            new_tab = self.tab_manager.add_new_tab()
-            if new_tab:
-                if hasattr(self, 'privacy_manager'):
-                    self.privacy_manager.apply_privacy_settings(new_tab)
+            # Determinar si es búsqueda o URL
+            if hasattr(self, 'search_engine_manager') and self.search_engine_manager:
+                is_search = self.search_engine_manager.is_search_query(url)
                 
-                # Conectar la señal de carga terminada para sincronizar con scraping
-                new_tab.loadFinished.connect(lambda success: self.on_page_loaded(new_tab, final_url))
-                
-                new_tab.setUrl(QUrl(final_url))
-                self.url_bar.setText(final_url)
-                self.tab_manager.tabs.setCurrentWidget(new_tab)
+                if is_search:
+                    # Es una búsqueda - usar motor de búsqueda
+                    engine_id = self.selected_search_engine if hasattr(self, 'selected_search_engine') and self.selected_search_engine else None
+                    final_url = self.search_engine_manager.search(url, engine_id)
+                    # Resetear motor temporal
+                    if hasattr(self, 'selected_search_engine'):
+                        self.selected_search_engine = None
+                else:
+                    # Es una URL
+                    final_url = url if url.startswith(('http://', 'https://')) else 'https://' + url
             else:
-                QMessageBox.warning(self, "Error", "Could not create a new tab")
+                # Fallback al comportamiento anterior
+                if url.startswith(('http://', 'https://')) or ('.' in url and ' ' not in url):
+                    final_url = url if url.startswith(('http://', 'https://')) else 'https://' + url
+                else:
+                    query = urllib.parse.quote(url)
+                    final_url = f'https://duckduckgo.com/?q={query}'
+            
+            # Navegar en la pestaña actual o crear nueva
+            current_tab = self.tab_manager.tabs.currentWidget()
+            if current_tab and isinstance(current_tab, QWebEngineView):
+                # Navegar en pestaña actual
+                if hasattr(self, 'privacy_manager'):
+                    self.privacy_manager.apply_privacy_settings(current_tab)
+                
+                current_tab.setUrl(QUrl(final_url))
+                self.url_bar.setText(final_url)
+            else:
+                # Crear nueva pestaña
+                new_tab = self.tab_manager.add_new_tab()
+                if new_tab:
+                    if hasattr(self, 'privacy_manager'):
+                        self.privacy_manager.apply_privacy_settings(new_tab)
+                    
+                    # Conectar la señal de carga terminada para sincronizar con scraping
+                    new_tab.loadFinished.connect(lambda success: self.on_page_loaded(new_tab, final_url))
+                    
+                    new_tab.setUrl(QUrl(final_url))
+                    self.url_bar.setText(final_url)
+                    self.tab_manager.tabs.setCurrentWidget(new_tab)
+                else:
+                    QMessageBox.warning(self, "Error", "Could not create a new tab")
         except Exception as e:
             error_msg = f"Error loading URL: {str(e)}"
             print(error_msg)
             QMessageBox.critical(self, "Error", error_msg)
+    
+    def on_search_engine_selected(self, engine_id):
+        """Callback cuando se selecciona un motor de búsqueda temporal"""
+        self.selected_search_engine = engine_id
+        # Dar foco a la barra de URL para que el usuario escriba
+        self.url_bar.setFocus()
+        self.url_bar.selectAll()
     
     def on_page_loaded(self, browser_tab, url):
         """Callback when page loading is finished"""
@@ -1309,14 +1539,124 @@ class MainWindow(QMainWindow):
     def toggle_chat_panel(self):
         """Toggle AI chat panel visibility USING FIXED STACK"""
         if CHAT_AVAILABLE and hasattr(self, 'chat_panel') and self.chat_panel:
-            if (self.advanced_panel_stack.currentWidget() == self.chat_panel and 
+            if (self.advanced_panel_stack.currentWidget() == self.chat_panel and
                 self.advanced_panel_stack.isVisible()):
                 self.hide_advanced_panel()
             else:
                 self.show_advanced_panel(self.chat_panel)
         else:
             QMessageBox.information(self, "🤖 AI Chat", "AI chat tools are not available. Verify that chat_panel.py is present.")
-    
+
+    def toggle_gentab_panel(self):
+        """Toggle GenTab panel visibility USING FIXED STACK"""
+        if GENTAB_AVAILABLE and hasattr(self, 'gentab_panel') and self.gentab_panel:
+            if (self.advanced_panel_stack.currentWidget() == self.gentab_panel and
+                self.advanced_panel_stack.isVisible()):
+                self.hide_advanced_panel()
+            else:
+                self.show_advanced_panel(self.gentab_panel)
+        else:
+            QMessageBox.information(self, "✨ GenTab",
+                                   "GenTab no está disponible.\n"
+                                   "Verifica que gentab_panel.py y gentab_engine.py estén presentes.")
+
+    def _open_gentab_in_new_tab(self, title: str, html_content: str):
+        """Abre una GenTab generada en una nueva pestaña del navegador."""
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+            from PySide6.QtCore import QUrl
+
+            browser = QWebEngineView()
+
+            profile = browser.page().profile()
+            if hasattr(self, 'network_interceptor') and self.network_interceptor:
+                try:
+                    user_agent = self.network_interceptor._get_user_agent()
+                    profile.setHttpUserAgent(user_agent)
+                except Exception:
+                    pass
+
+            browser.setHtml(html_content, QUrl("about:gentab"))
+
+            display_title = f"✨ {title}" if len(title) <= 28 else f"✨ {title[:25]}..."
+            index = self.tab_manager.tabs.addTab(browser, display_title)
+            self.tab_manager.tabs.setCurrentIndex(index)
+
+            if hasattr(self, 'url_bar'):
+                self.url_bar.setText(f"gentab://{title.lower().replace(' ', '-')}")
+
+            self.setWindowTitle(f"✨ {title} - Scrapelio GenTab")
+            print(f"[GenTab] Opened GenTab: {title}")
+
+        except Exception as e:
+            print(f"[GenTab] Error opening GenTab: {e}")
+            QMessageBox.warning(self, "GenTab", f"Error al abrir GenTab: {str(e)}")
+
+    def toggle_tab_groups_panel(self):
+        """Toggle Tab Groups panel visibility USING FIXED STACK"""
+        if hasattr(self, 'tab_groups_panel') and self.tab_groups_panel:
+            if (self.advanced_panel_stack.currentWidget() == self.tab_groups_panel and
+                self.advanced_panel_stack.isVisible()):
+                self.hide_advanced_panel()
+            else:
+                self.show_advanced_panel(self.tab_groups_panel)
+        else:
+            QMessageBox.information(self, "📑 Tab Groups", "Tab Groups panel is not available.")
+
+    def toggle_history_panel(self):
+        """Toggle History panel visibility using MAIN SIDEBAR STACK"""
+        if not hasattr(self, 'history_panel'):
+            # Lazy loading if not initialized
+            try:
+                from history import HistoryPanel
+                self.history_panel = HistoryPanel(self.history_manager, self.tab_manager)
+            except ImportError:
+                print("Error importing HistoryPanel")
+                return
+
+        # Use helper method
+        if (self.advanced_panel_stack.currentWidget() == self.history_panel and 
+            self.advanced_panel_stack.isVisible()):
+            self.hide_advanced_panel()
+        else:
+            self.show_advanced_panel(self.history_panel)
+                
+    def toggle_download_panel(self):
+        """Toggle Download panel visibility using MAIN SIDEBAR STACK"""
+        if not hasattr(self, 'download_panel'):
+             return
+
+        # Use helper method
+        if (self.advanced_panel_stack.currentWidget() == self.download_panel and 
+            self.advanced_panel_stack.isVisible()):
+            self.hide_advanced_panel()
+        else:
+            self.show_advanced_panel(self.download_panel)
+
+    def toggle_password_manager(self):
+        """Toggle Password Manager visibility using MAIN SIDEBAR STACK"""
+        if not hasattr(self, 'password_manager') or not self.password_manager:
+            return
+
+        # Use helper method
+        if (self.advanced_panel_stack.currentWidget() == self.password_manager and 
+            self.advanced_panel_stack.isVisible()):
+            self.hide_advanced_panel()
+        else:
+            self.show_advanced_panel(self.password_manager)
+
+    def toggle_bookmark_manager(self):
+        """Toggle Bookmark Manager visibility using MAIN SIDEBAR STACK"""
+        if not hasattr(self, 'bookmark_manager') or not self.bookmark_manager:
+            return
+
+        # Use helper method
+        if (self.advanced_panel_stack.currentWidget() == self.bookmark_manager and 
+            self.advanced_panel_stack.isVisible()):
+            self.hide_advanced_panel()
+        else:
+            self.show_advanced_panel(self.bookmark_manager)
+
     # toggle_seo_panel method removed - SEO Analyzer is now a downloadable plugin
     # and will be managed by UnifiedPluginManager
     
@@ -1532,30 +1872,35 @@ class MainWindow(QMainWindow):
         
         menu.addSeparator()
         
+        # === Sección 1.5: Gestión de sesiones ===
+        session_menu = menu.addMenu("Sesiones")
+        session_menu.addAction("Guardar sesión actual...").triggered.connect(self.save_current_session)
+        session_menu.addAction("Restaurar sesión...").triggered.connect(self.show_session_manager)
+        
+        menu.addSeparator()
+        
         # === Sección 2: Gestión de contenido ===
         bookmarks_menu = menu.addMenu("Marcadores")
         bookmarks_menu.addAction("Mostrar marcadores").triggered.connect(
-            lambda: self.show_bookmarks_panel())
+            lambda: self.toggle_bookmark_manager())
         bookmarks_menu.addAction("Añadir marcador").triggered.connect(
             lambda: self.bookmark_manager.add_bookmark())
-        bookmarks_menu.addAction("Organizar marcadores").triggered.connect(
-            lambda: self.bookmark_manager.show())
+        # Removed redundant organize bookmarks option
         
         history_action = menu.addAction("Historial")
-        history_action.triggered.connect(
-            lambda: self.history_manager.show_history(self.tab_manager))
+        history_action.triggered.connect(self.toggle_history_panel)
         
         downloads_action = menu.addAction("Descargas")
         downloads_action.setShortcut("Ctrl+Shift+Y")
-        downloads_action.triggered.connect(self.show_downloads)
+        downloads_action.triggered.connect(self.toggle_download_panel)
         
         passwords_action = menu.addAction("Contraseñas")
-        passwords_action.triggered.connect(
-            lambda: self.password_manager.show())
+        passwords_action.triggered.connect(self.toggle_password_manager)
         
         extensions_action = menu.addAction("Extensiones y temas")
         extensions_action.setShortcut("Ctrl+Shift+A")
-        extensions_action.triggered.connect(self.show_plugins_panel)
+        # Fix: Ensure plugin store toggle works or falls back to basic panel
+        extensions_action.triggered.connect(self.toggle_plugin_store if hasattr(self, 'toggle_plugin_store') else self.show_plugins_panel)
         
         menu.addSeparator()
         
@@ -1607,19 +1952,22 @@ class MainWindow(QMainWindow):
         tools_menu.addAction("UserScripts...").triggered.connect(
             self.show_userscripts)
 
-        # Submenú de temas modernos
+        # Submenú de temas modernos - AUDITED & FIXED
         themes_menu = tools_menu.addMenu("Cambiar tema visual")
+        # Use simple string identifiers for the theme manager
         themes_menu.addAction("🌞 Tema Claro (Light)").triggered.connect(
-            lambda: self.change_visual_theme('light'))
+            lambda: self.apply_theme('light'))
         themes_menu.addAction("🌙 Tema Oscuro (Dark)").triggered.connect(
-            lambda: self.change_visual_theme('dark'))
-        themes_menu.addAction("💎 Tema Azul (Blue)").triggered.connect(
-            lambda: self.change_visual_theme('blue'))
+            lambda: self.apply_theme('dark'))
+        # themes_menu.addAction("💎 Tema Azul (Blue)").triggered.connect(
+        #     lambda: self.apply_theme('blue'))
 
         tools_menu.addAction("Herramientas de desarrollador").setShortcut("F12")
         tools_menu.actions()[-1].triggered.connect(self.toggle_dev_tools)
         tools_menu.addAction("Administrador de tareas").triggered.connect(
-            self.show_task_manager)
+            self.show_performance_monitor)
+        tools_menu.addAction("Diagnóstico de rendimiento").triggered.connect(
+            self.run_performance_diagnostic)
         tools_menu.addAction("Ver código fuente").setShortcut("Ctrl+U")
         tools_menu.actions()[-1].triggered.connect(self.view_page_source)
         
@@ -1829,7 +2177,7 @@ class MainWindow(QMainWindow):
             registration_url = get_registration_url()
         except ImportError:
             # Fallback si no existe network_config.py
-            registration_url = "http://192.168.1.130:4321/auth/registro.html"
+            registration_url = "http://192.168.1.175:4321/auth/registro.html"
         
         self.tab_manager.add_new_tab(registration_url)
 
@@ -1868,7 +2216,7 @@ class MainWindow(QMainWindow):
                                 if self.auth_manager and self.auth_manager.is_plugin_licensed(plugin_id):
                                     print(f"[AUTH] Force loading licensed plugin: {plugin_id}")
                                     if self.plugin_manager.load_plugin(plugin_id):
-                                        print(f"[AUTH] ✅ Plugin {plugin_id} loaded successfully")
+                                        print(f"[AUTH] Plugin {plugin_id} loaded successfully")
             except Exception as e:
                 print(f"[AUTH] Error loading installed plugins: {e}")
                 import traceback
@@ -1883,17 +2231,17 @@ class MainWindow(QMainWindow):
 
     def disable_premium_plugins(self):
         """Deshabilitar plugins premium cuando el usuario cierra sesión"""
-        print("[AUTH] 🔒 Disabling premium plugins...")
+        print("[AUTH] Disabling premium plugins...")
         
         # Deshabilitar panel de scraping
         if hasattr(self, 'scraping_panel') and self.scraping_panel:
             self.scraping_panel.setEnabled(False)
-            print("[AUTH] ✓ Scraping panel disabled")
+            print("[AUTH] Scraping panel disabled")
         
         # Deshabilitar panel de proxy
         if hasattr(self, 'proxy_panel') and self.proxy_panel:
             self.proxy_panel.setEnabled(False)
-            print("[AUTH] ✓ Proxy panel disabled")
+            print("[AUTH] Proxy panel disabled")
         
         # CRÍTICO: Ocultar y descargar plugins dinámicos
         if hasattr(self, 'plugin_manager') and self.plugin_manager:
@@ -1902,9 +2250,9 @@ class MainWindow(QMainWindow):
                 loaded_plugins = list(self.plugin_manager.plugins.keys())
                 for plugin_id in loaded_plugins:
                     self.plugin_manager.unload_plugin(plugin_id)
-                    print(f"[AUTH] ✓ Plugin {plugin_id} unloaded")
+                    print(f"[AUTH] Plugin {plugin_id} unloaded")
             except Exception as e:
-                print(f"[AUTH] ⚠️ Error unloading plugins: {e}")
+                print(f"[AUTH] Error unloading plugins: {e}")
         
         # Remover botones de plugins dinámicos del sidebar
         if hasattr(self, 'dynamic_plugin_actions'):
@@ -1914,9 +2262,9 @@ class MainWindow(QMainWindow):
                     if hasattr(self, 'side_strip') and self.side_strip:
                         self.side_strip.removeAction(action)
                     del self.dynamic_plugin_actions[plugin_id]
-                    print(f"[AUTH] ✓ Button for plugin {plugin_id} removed")
+                    print(f"[AUTH] Button for plugin {plugin_id} removed")
                 except Exception as e:
-                    print(f"[AUTH] ⚠️ Error removing button for {plugin_id}: {e}")
+                    print(f"[AUTH] Error removing button for {plugin_id}: {e}")
         
         # Remover paneles de plugins dinámicos
         if hasattr(self, 'dynamic_plugin_panels'):
@@ -1924,11 +2272,11 @@ class MainWindow(QMainWindow):
                 try:
                     self.removeDockWidget(dock)
                     del self.dynamic_plugin_panels[plugin_id]
-                    print(f"[AUTH] ✓ Panel for plugin {plugin_id} removed")
+                    print(f"[AUTH] Panel for plugin {plugin_id} removed")
                 except Exception as e:
-                    print(f"[AUTH] ⚠️ Error removing panel for {plugin_id}: {e}")
+                    print(f"[AUTH] Error removing panel for {plugin_id}: {e}")
         
-        print("[AUTH] 🔒 All premium plugins disabled successfully")
+        print("[AUTH] All premium plugins disabled successfully")
 
     def set_light_theme(self):
         """Aplica el tema claro usando el sistema de temas JSON"""
@@ -1977,6 +2325,124 @@ class MainWindow(QMainWindow):
         # El UnifiedPluginManager se inicializa síncronamente en __init__
         # Este método nunca se llama porque quitamos QTimer.singleShot
         print("[INFO] _initialize_plugin_system is legacy code - UnifiedPluginManager already initialized")
+
+    def _configure_default_profile_user_agent(self):
+        """
+        Configurar User-Agent en el perfil predeterminado de QWebEngine.
+        Este método se llama al iniciar la aplicación para asegurar que
+        todas las pestañas usen el User-Agent correcto desde el principio.
+        """
+        try:
+            if not hasattr(self, 'network_interceptor') or not self.network_interceptor:
+                print("[WARNING] Network interceptor not available, cannot configure User-Agent")
+                return
+
+            # Obtener el perfil predeterminado
+            default_profile = QWebEngineProfile.defaultProfile()
+
+            # Obtener el User-Agent configurado
+            user_agent_string = self.network_interceptor._get_user_agent()
+
+            # Configurar el User-Agent en el perfil predeterminado
+            default_profile.setHttpUserAgent(user_agent_string)
+
+            # Configurar el interceptor de red en el perfil predeterminado
+            default_profile.setUrlRequestInterceptor(self.network_interceptor)
+
+            print(f"[UA-GLOBAL] ✓ User-Agent configured on default profile: {self.network_interceptor.user_agent_type}")
+            print(f"[UA-GLOBAL] ✓ User-Agent string: {user_agent_string[:100]}...")
+
+        except Exception as e:
+            print(f"[ERROR] Failed to configure default profile User-Agent: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def update_global_user_agent(self):
+        """
+        Actualizar el User-Agent del perfil global cuando se cambia en las configuraciones.
+        Este método debe llamarse cuando el usuario cambia el User-Agent en las opciones.
+        """
+        try:
+            if not hasattr(self, 'network_interceptor') or not self.network_interceptor:
+                print("[WARNING] Network interceptor not available, cannot update User-Agent")
+                return False
+
+            # Obtener el perfil predeterminado
+            default_profile = QWebEngineProfile.defaultProfile()
+
+            # Obtener el User-Agent configurado actualizado
+            user_agent_string = self.network_interceptor._get_user_agent()
+
+            # Actualizar el User-Agent en el perfil predeterminado
+            default_profile.setHttpUserAgent(user_agent_string)
+
+            print(f"[UA-UPDATE] ✓ User-Agent updated on default profile: {self.network_interceptor.user_agent_type}")
+            print(f"[UA-UPDATE] ✓ New User-Agent: {user_agent_string[:100]}...")
+
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to update global User-Agent: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _load_free_plugins(self):
+        """Cargar plugins gratuitos automáticamente sin necesidad de autenticación"""
+        if not self.plugin_manager:
+            return
+        
+        print("[UI] Loading free plugins...")
+        
+        try:
+            import json
+            import os
+            
+            # Leer configuración de plugins
+            config_file = "plugins/plugin_config.json"
+            if not os.path.exists(config_file):
+                print("[UI] No plugin config file found")
+                return
+            
+            with open(config_file, 'r') as f:
+                plugin_config = json.load(f)
+            
+            # Cargar plugins habilitados y gratuitos
+            for plugin_id, config in plugin_config.items():
+                if not config.get('enabled', False):
+                    continue
+                
+                # Verificar si el plugin existe
+                plugin_dir = os.path.join("plugins", plugin_id)
+                if not os.path.exists(plugin_dir):
+                    continue
+                
+                # Leer plugin_info.json para verificar si es premium
+                plugin_info_file = os.path.join(plugin_dir, "plugin_info.json")
+                is_premium = False
+                
+                if os.path.exists(plugin_info_file):
+                    try:
+                        with open(plugin_info_file, 'r') as f:
+                            plugin_info = json.load(f)
+                            is_premium = plugin_info.get('premium', False)
+                    except:
+                        pass
+                
+                # Cargar solo plugins gratuitos
+                if not is_premium:
+                    print(f"[UI] Loading free plugin: {plugin_id}")
+                    if self.plugin_manager.load_plugin(plugin_id):
+                        print(f"[UI] Free plugin {plugin_id} loaded successfully")
+                    else:
+                        print(f"[UI] Failed to load free plugin {plugin_id}")
+                else:
+                    print(f"[UI] Skipping premium plugin: {plugin_id}")
+                    
+        except Exception as e:
+            print(f"[UI] Error loading free plugins: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _setup_auth_panel(self):
         """Setup authentication panel after auth_manager is ready"""
@@ -2009,18 +2475,45 @@ class MainWindow(QMainWindow):
             
             plugin_module = self.plugin_manager.plugins[plugin_id]
             
-            # Verificar si el plugin tiene get_plugin_panel
+            # NUEVO: Soporte para plugins basados en PluginBase
+            if hasattr(plugin_module, 'get_plugin_instance'):
+                print(f"[UI] Plugin {plugin_id} uses PluginBase architecture")
+                plugin_instance = plugin_module.get_plugin_instance()
+
+                if plugin_instance and hasattr(plugin_instance, 'initialize'):
+                    print(f"[UI] Initializing PluginBase plugin: {plugin_id}")
+                    try:
+                        success = plugin_instance.initialize(self)  # Pass browser instance
+                        if success:
+                            print(f"[UI] Plugin {plugin_id} initialized successfully")
+                            # Store instance for later use
+                            self.dynamic_plugin_panels[plugin_id] = plugin_instance
+
+                            # Cargar UI específica del plugin de temas
+                            if plugin_id == "themes":
+                                self._load_themes_plugin_dynamic(plugin_instance)
+                        else:
+                            print(f"[UI] Plugin {plugin_id} initialization returned False")
+                    except Exception as e:
+                        print(f"[UI] Error initializing plugin {plugin_id}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                return
+            
+            # Verificar si el plugin tiene get_plugin_panel (plugins antiguos)
             if not hasattr(plugin_module, 'get_scraping_panel') and not hasattr(plugin_module, 'get_proxy_panel') and not hasattr(plugin_module, 'get_seo_panel'):
                 print(f"[UI] Plugin {plugin_id} doesn't have a panel getter")
                 return
             
-            # Cargar panel según el tipo de plugin
+            # Cargar panel según el tipo de plugin (plugins antiguos)
             if plugin_id == "scraping" and hasattr(plugin_module, 'get_scraping_panel'):
                 self._load_scraping_plugin_dynamic(plugin_module)
             elif plugin_id == "proxy" and hasattr(plugin_module, 'get_proxy_panel'):
                 self._load_proxy_plugin_dynamic(plugin_module)
             elif plugin_id == "seo_analyzer" and hasattr(plugin_module, 'get_seo_panel'):
                 self._load_seo_plugin_dynamic(plugin_module)
+            elif plugin_id == "pentesting_tool" and hasattr(plugin_module, 'get_panel_class'):
+                self._load_pentesting_plugin_dynamic(plugin_module)
             elif plugin_id == "themes":
                 print(f"[UI] Themes plugin loaded, no UI changes needed")
             else:
@@ -2099,13 +2592,13 @@ class MainWindow(QMainWindow):
                 self.dynamic_plugin_actions['scraping'] = self.scraping_action
                 self.dynamic_plugin_panels['scraping'] = self.scraping_panel
                 
-                print("[UI] ✅ Scraping plugin loaded and button added to sidebar")
+                print("[UI] Scraping plugin loaded and button added to sidebar")
             elif existing_scraping_action:
                 # Ya existe botón estático, solo asegurarnos que funciona
-                print("[UI] ✅ Scraping plugin loaded, using existing static button")
+                print("[UI] Scraping plugin loaded, using existing static button")
                 self.dynamic_plugin_panels['scraping'] = self.scraping_panel
             else:
-                print("[UI] ✅ Scraping plugin loaded, button already exists in dynamic_plugin_actions")
+                print("[UI] Scraping plugin loaded, button already exists in dynamic_plugin_actions")
             
             # Marcar scraping como disponible
             SCRAPING_AVAILABLE = True
@@ -2187,13 +2680,13 @@ class MainWindow(QMainWindow):
                 self.dynamic_plugin_actions['proxy'] = self.proxy_action
                 self.dynamic_plugin_panels['proxy'] = self.proxy_panel
                 
-                print("[UI] ✅ Proxy plugin loaded and button added to sidebar")
+                print("[UI] Proxy plugin loaded and button added to sidebar")
             elif existing_proxy_action:
                 # Ya existe botón estático, solo asegurarnos que funciona
-                print("[UI] ✅ Proxy plugin loaded, using existing static button")
+                print("[UI] Proxy plugin loaded, using existing static button")
                 self.dynamic_plugin_panels['proxy'] = self.proxy_panel
             else:
-                print("[UI] ✅ Proxy plugin loaded, button already exists in dynamic_plugin_actions")
+                print("[UI] Proxy plugin loaded, button already exists in dynamic_plugin_actions")
             
             # Marcar proxy como disponible
             PROXY_AVAILABLE = True
@@ -2269,19 +2762,282 @@ class MainWindow(QMainWindow):
                 self.dynamic_plugin_actions['seo_analyzer'] = self.seo_action
                 self.dynamic_plugin_panels['seo_analyzer'] = self.seo_panel
                 
-                print("[UI] ✅ SEO plugin loaded and button added to sidebar")
+                print("[UI] SEO plugin loaded and button added to sidebar")
             elif existing_seo_action:
                 # Ya existe botón, solo asegurarnos que funciona
-                print("[UI] ✅ SEO plugin loaded, using existing button")
+                print("[UI] SEO plugin loaded, using existing button")
                 self.dynamic_plugin_panels['seo_analyzer'] = self.seo_panel
             else:
-                print("[UI] ✅ SEO plugin loaded, button already exists in dynamic_plugin_actions")
+                print("[UI] SEO plugin loaded, button already exists in dynamic_plugin_actions")
             
         except Exception as e:
             print(f"[UI] Error loading SEO plugin: {e}")
             import traceback
             traceback.print_exc()
     
+    def _load_pentesting_plugin_dynamic(self, plugin_module):
+        """Cargar plugin de Pentesting dinámicamente"""
+        try:
+            print("[UI] Loading Pentesting plugin dynamically...")
+            
+            # Obtener clase del panel
+            PentestingPanelClass = plugin_module.get_panel_class()
+            
+            if not PentestingPanelClass:
+                print("[UI] Pentesting plugin panel class not available")
+                return
+            
+            # Crear panel
+            self.pentesting_panel = PentestingPanelClass(parent=self)
+            
+            # Agregar al advanced_panel_stack
+            if hasattr(self, 'advanced_panel_stack'):
+                self.advanced_panel_stack.addWidget(self.pentesting_panel)
+                print("[UI] Added Pentesting panel to advanced_panel_stack")
+            
+            # Verificar si ya existe un botón de Pentesting
+            existing_pentest_action = None
+            for action in self.side_strip.actions():
+                if action.text() == 'Pentest' or action.text() == 'Pentesting':
+                    existing_pentest_action = action
+                    print("[UI] Found existing Pentesting button")
+                    break
+            
+            # Si no existe botón, crearlo
+            if not existing_pentest_action and 'pentesting_tool' not in self.dynamic_plugin_actions:
+                print("[UI] Creating new Pentesting button...")
+                self.pentesting_action = QAction(QIcon('icons/security.png'), '🛡️', self)
+                self.pentesting_action.setToolTip('Pentesting Suite')
+                self.pentesting_action.triggered.connect(self.toggle_pentesting_panel)
+                
+                # Insertar antes del botón de Plugin Store
+                actions = self.side_strip.actions()
+                store_index = -1
+                for i, action in enumerate(actions):
+                    if action.text() == 'Plugin Store':
+                        store_index = i
+                        break
+                
+                if store_index >= 0:
+                    self.side_strip.insertAction(actions[store_index], self.pentesting_action)
+                    print(f"[UI] Inserted Pentesting button before Plugin Store (index {store_index})")
+                else:
+                    self.side_strip.addAction(self.pentesting_action)
+                    print("[UI] Added Pentesting button to end of sidebar")
+                
+                self.dynamic_plugin_actions['pentesting_tool'] = self.pentesting_action
+                self.dynamic_plugin_panels['pentesting_tool'] = self.pentesting_panel
+                
+                print("[UI] Pentesting plugin loaded and button added to sidebar")
+            elif existing_pentest_action:
+                print("[UI] Pentesting plugin loaded, using existing button")
+                self.dynamic_plugin_panels['pentesting_tool'] = self.pentesting_panel
+            else:
+                print("[UI] Pentesting plugin loaded, button already exists in dynamic_plugin_actions")
+            
+        except Exception as e:
+            print(f"[UI] Error loading Pentesting plugin: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _load_themes_plugin_dynamic(self, plugin_instance):
+        """Cargar plugin de temas dinámicamente"""
+        try:
+            print("[UI] Loading themes plugin dynamically...")
+            print(f"[UI] Plugin instance: {plugin_instance}")
+
+            # Solo guardar la referencia al plugin, NO crear dock widget
+            # El widget se creará cuando se abra el diálogo
+            self.themes_plugin_instance = plugin_instance
+            print("[UI] Saved plugin instance reference for later dialog creation")
+
+            # Verificar si ya existe un botón de temas (del setup_side_strip hardcodeado)
+            existing_theme_action = None
+
+            # Verificar si existe self.theme_action del setup estático
+            if hasattr(self, 'theme_action') and self.theme_action:
+                existing_theme_action = self.theme_action
+                print("[UI] Found existing theme button from static setup (self.theme_action)")
+
+                # Desconectar TODAS las conexiones previas
+                try:
+                    existing_theme_action.triggered.disconnect()
+                    print("[UI] Disconnected all previous callbacks")
+                except Exception as e:
+                    print(f"[UI] Could not disconnect callbacks: {e}")
+
+                # Conectar el nuevo callback
+                existing_theme_action.triggered.connect(self.toggle_themes_panel)
+                existing_theme_action.setToolTip('Gestor de Temas Avanzado')
+                print("[UI] Reconnected theme button to toggle_themes_panel")
+
+            # Si no existe botón (ni estático ni dinámico), crearlo
+            if not existing_theme_action and 'themes' not in self.dynamic_plugin_actions:
+                print("[UI] Creating new themes button...")
+
+                # Intentar obtener acciones del toolbar del plugin
+                toolbar_actions = []
+                if hasattr(plugin_instance, 'get_toolbar_actions'):
+                    toolbar_actions = plugin_instance.get_toolbar_actions()
+
+                # Si el plugin provee acciones, usar la primera como botón principal
+                if toolbar_actions and len(toolbar_actions) > 0:
+                    # Usar el icono/acción del plugin pero conectarlo a nuestro toggle
+                    theme_action = toolbar_actions[0]
+                    # Reconectar para abrir el panel en lugar de toggle rápido
+                    try:
+                        theme_action.triggered.disconnect()
+                    except:
+                        pass
+                    theme_action.triggered.connect(self.toggle_themes_panel)
+                    theme_action.setToolTip('Gestor de Temas Avanzado')
+                    self.themes_action = theme_action
+                else:
+                    # Crear botón personalizado
+                    self.themes_action = QAction(QIcon('icons/settings.png'), 'Temas', self)
+                    self.themes_action.setToolTip('Gestor de Temas Avanzado')
+                    self.themes_action.triggered.connect(self.toggle_themes_panel)
+
+                # Insertar antes del botón de Plugin Store
+                actions = self.side_strip.actions()
+                store_index = -1
+                for i, action in enumerate(actions):
+                    if action.text() == 'Plugin Store':
+                        store_index = i
+                        break
+
+                if store_index >= 0:
+                    self.side_strip.insertAction(actions[store_index], self.themes_action)
+                    print(f"[UI] Inserted themes button before Plugin Store (index {store_index})")
+                else:
+                    self.side_strip.addAction(self.themes_action)
+                    print("[UI] Added themes button to end of sidebar")
+
+                self.dynamic_plugin_actions['themes'] = self.themes_action
+
+            print("[UI] Themes plugin button configured successfully")
+
+        except Exception as e:
+            print(f"[UI] Error loading themes plugin: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def toggle_themes_panel(self):
+        """Toggle visibility of themes panel - Shows as floating dialog"""
+        print("[UI] toggle_themes_panel() called")
+
+        # Check if dialog already exists
+        if hasattr(self, 'themes_dialog') and self.themes_dialog:
+            # If it's visible, hide it
+            if self.themes_dialog.isVisible():
+                print("[UI] Dialog exists and is visible - hiding it")
+                self.themes_dialog.hide()
+                return
+            else:
+                # If it exists but is hidden, show it again
+                print("[UI] Dialog exists but hidden - showing it")
+                self.themes_dialog.show()
+                self.themes_dialog.raise_()
+                self.themes_dialog.activateWindow()
+                return
+        
+        # Dialog doesn't exist, create it
+        print("[UI] Creating fresh themes dialog")
+        self._create_themes_dialog()
+
+        if self.themes_dialog:
+            print("[UI] Showing themes dialog")
+            print(f"[UI] Dialog size: {self.themes_dialog.size()}")
+            print(f"[UI] Dialog position: {self.themes_dialog.pos()}")
+            print(f"[UI] Dialog visible before show(): {self.themes_dialog.isVisible()}")
+            self.themes_dialog.show()
+            print(f"[UI] Dialog visible after show(): {self.themes_dialog.isVisible()}")
+            self.themes_dialog.raise_()
+            self.themes_dialog.activateWindow()
+        else:
+            print("[UI] ERROR: Failed to create themes dialog")
+
+    def _create_themes_dialog(self):
+        """Create the themes dialog window"""
+        try:
+            from PySide6.QtWidgets import QDialog, QVBoxLayout
+            from PySide6.QtCore import Qt
+
+            # Get the theme selector widget from the plugin
+            theme_widget = None
+            if hasattr(self, 'themes_plugin_instance') and self.themes_plugin_instance:
+                if hasattr(self.themes_plugin_instance, 'get_theme_selector'):
+                    theme_widget = self.themes_plugin_instance.get_theme_selector()
+                    print(f"[UI] Got theme selector from plugin: {theme_widget}")
+                elif hasattr(self.themes_plugin_instance, 'get_settings_widget'):
+                    theme_widget = self.themes_plugin_instance.get_settings_widget()
+                    print(f"[UI] Got settings widget from plugin: {theme_widget}")
+
+            if not theme_widget:
+                print("[UI] ERROR: Could not get theme widget from plugin")
+                return
+
+            # CRITICAL: Remove widget from previous parent to avoid Qt parenting issues
+            if theme_widget.parent():
+                print(f"[UI] Removing widget from previous parent: {theme_widget.parent()}")
+                theme_widget.setParent(None)
+
+            # Create dialog with flags to ensure visibility
+            self.themes_dialog = QDialog(self)
+            self.themes_dialog.setWindowTitle("Gestor de Temas Avanzado")
+
+            # Set window flags to keep on top and ensure visibility
+            self.themes_dialog.setWindowFlags(
+                Qt.Window |
+                Qt.WindowStaysOnTopHint |
+                Qt.WindowCloseButtonHint |
+                Qt.WindowMaximizeButtonHint
+            )
+
+            # Set size and position
+            self.themes_dialog.resize(900, 600)
+
+            # Center the dialog on screen
+            screen = self.screen()
+            if screen:
+                screen_geometry = screen.geometry()
+                dialog_geometry = self.themes_dialog.geometry()
+                x = (screen_geometry.width() - dialog_geometry.width()) // 2
+                y = (screen_geometry.height() - dialog_geometry.height()) // 2
+                self.themes_dialog.move(x, y)
+                print(f"[UI] Positioned dialog at ({x}, {y})")
+
+            # Create layout and add widget
+            layout = QVBoxLayout(self.themes_dialog)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            # Add widget with proper parent
+            layout.addWidget(theme_widget)
+
+            # Force the widget to be visible
+            theme_widget.setVisible(True)
+            theme_widget.show()
+
+            # Connect to finished signal to clean up when dialog is closed
+            self.themes_dialog.finished.connect(self._on_themes_dialog_closed)
+
+            print(f"[UI] Theme widget visibility forced")
+            print(f"[UI] Theme widget is now visible: {theme_widget.isVisible()}")
+            print("[UI] Themes dialog created successfully")
+
+        except Exception as e:
+            print(f"[UI] Error creating themes dialog: {e}")
+            import traceback
+            traceback.print_exc()
+            self.themes_dialog = None
+
+    def _on_themes_dialog_closed(self):
+        """Called when themes dialog is closed"""
+        print("[UI] Themes dialog closed by user")
+        if hasattr(self, 'themes_dialog') and self.themes_dialog:
+            self.themes_dialog = None
+            print("[UI] Themes dialog reference cleared")
+
     def toggle_seo_panel(self):
         """Toggle visibility of SEO panel"""
         if hasattr(self, 'seo_dock'):
@@ -2475,15 +3231,29 @@ class MainWindow(QMainWindow):
         if not page:
             return
 
-        # Desconectar señales anteriores para evitar duplicados
+        # IMPORTANTE: NO desconectar browser.urlChanged porque eliminaría
+        # la conexión crítica que actualiza la barra de URL en tabs.py
+        # Solo desconectamos las señales específicas del status bar si existen
+        
         try:
-            page.linkHovered.disconnect()
-            browser.urlChanged.disconnect()
-            browser.loadProgress.disconnect()
+            page.linkHovered.disconnect(self.status_bar.update_url_hover)
+        except:
+            pass
+        
+        try:
+            browser.loadProgress.disconnect(self.status_bar.update_load_progress)
+        except:
+            pass
+        
+        try:
             page.loadStarted.disconnect()
+        except:
+            pass
+            
+        try:
             page.loadFinished.disconnect()
         except:
-            pass  # Ignorar si no había conexiones previas
+            pass
 
         # Conectar señales del browser al status bar
         # linkHovered es señal de QWebEnginePage, no de QWebEngineView
@@ -2590,6 +3360,18 @@ class MainWindow(QMainWindow):
                 "El interceptor de red no está inicializado."
             )
 
+    def show_homepage_settings(self, parent_dialog=None):
+        """Mostrar configuración de página de inicio"""
+        if hasattr(self, 'homepage_manager') and self.homepage_manager:
+            dialog = HomepageSettingsDialog(self.homepage_manager, parent_dialog or self)
+            dialog.exec()
+        else:
+            QMessageBox.warning(
+                self,
+                "Homepage Manager no disponible",
+                "El gestor de página de inicio no está inicializado."
+            )
+
     def show_userscripts(self):
         """Mostrar gestor de UserScripts"""
         if hasattr(self, 'userscript_manager'):
@@ -2606,10 +3388,10 @@ class MainWindow(QMainWindow):
         """Cambiar tema visual del navegador (light, dark, blue)"""
         try:
             # Cambiar tema en el theme manager
-            self.theme_manager.change_theme(theme_name)
+            self.modern_styles.change_theme(theme_name)
 
             # Aplicar nuevos estilos a la navbar
-            modern_navbar_style = self.theme_manager.get_navbar_style()
+            modern_navbar_style = self.modern_styles.get_navbar_style()
             combined_style = modern_navbar_style + """
                 QToolButton {
                     width: 36px;
@@ -2631,11 +3413,11 @@ class MainWindow(QMainWindow):
             self.nav_bar.setStyleSheet(combined_style)
 
             # Aplicar nuevo estilo al URL bar
-            urlbar_style = self.theme_manager.get_urlbar_style()
+            urlbar_style = self.modern_styles.get_urlbar_style()
             self.url_bar.setStyleSheet(urlbar_style)
 
             # Aplicar nuevo estilo a las pestañas
-            tab_style = self.theme_manager.get_tab_style()
+            tab_style = self.modern_styles.get_tab_style()
             self.tab_manager.tabs.setStyleSheet(tab_style)
 
             # Mensaje de confirmación en status bar
@@ -2677,6 +3459,127 @@ class MainWindow(QMainWindow):
              if self.tab_manager.tabs.count() > 0 else "Ninguna") +
             f"\nTotal de pestañas: {self.tab_manager.tabs.count()}")
     
+    def show_screenshot_dialog(self):
+        """Mostrar diálogo de captura de pantalla"""
+        current_browser = self.tab_manager.tabs.currentWidget()
+        if current_browser:
+            screenshot_tool = ScreenshotTool(current_browser, self)
+            screenshot_tool.show_screenshot_dialog()
+    
+    def show_region_capture(self):
+        """Captura de región específica"""
+        current_browser = self.tab_manager.tabs.currentWidget()
+        if not current_browser:
+            QMessageBox.warning(self, "Sin página", "No hay ninguna página activa.")
+            return
+        
+        # Capturar pantalla completa primero
+        screenshot_tool = ScreenshotTool(current_browser, self)
+        full_image = screenshot_tool.capture_visible_area()
+        
+        if full_image:
+            # Mostrar selector de región
+            selector = RegionSelector(full_image, self)
+            selector.region_selected.connect(
+                lambda rect: self._save_region_capture(full_image, rect)
+            )
+            selector.show()
+    
+    def _save_region_capture(self, image, rect):
+        """Guardar captura de región"""
+        # Recortar imagen
+        cropped = image.copy(rect)
+        
+        # Guardar
+        from PySide6.QtWidgets import QFileDialog
+        from datetime import datetime
+        
+        default_name = f"region_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar captura de región",
+            os.path.join(os.path.expanduser("~"), "Pictures", default_name),
+            "PNG Image (*.png);;JPEG Image (*.jpg)"
+        )
+        
+        if filename:
+            cropped.save(filename)
+            QMessageBox.information(self, "Guardado", f"Captura guardada en:\n{filename}")
+    
+    def show_annotated_capture(self):
+        """Captura con editor de anotaciones"""
+        current_browser = self.tab_manager.tabs.currentWidget()
+        if not current_browser:
+            QMessageBox.warning(self, "Sin página", "No hay ninguna página activa.")
+            return
+        
+        # Capturar pantalla
+        screenshot_tool = ScreenshotTool(current_browser, self)
+        image = screenshot_tool.capture_visible_area()
+        
+        if image:
+            # Abrir editor de anotaciones
+            editor = AnnotationEditor(image, self)
+            if editor.exec() == QDialog.Accepted:
+                annotated_image = editor.get_annotated_image()
+                
+                # Guardar
+                from PySide6.QtWidgets import QFileDialog
+                from datetime import datetime
+                
+                default_name = f"annotated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                filename, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Guardar captura anotada",
+                    os.path.join(os.path.expanduser("~"), "Pictures", default_name),
+                    "PNG Image (*.png);;JPEG Image (*.jpg)"
+                )
+                
+                if filename:
+                    annotated_image.save(filename)
+                    QMessageBox.information(self, "Guardado", f"Captura guardada en:\n{filename}")
+    
+    def show_performance_monitor(self):
+        """Mostrar administrador de tareas"""
+        monitor = PerformanceMonitor(self)
+        monitor.show()
+    
+    def run_performance_diagnostic(self):
+        """Ejecutar diagnóstico de rendimiento"""
+        PerformanceDiagnostic.run_diagnostic(self)
+    
+    def save_current_session(self):
+        """Guardar sesión actual con nombre"""
+        if not self.session_manager:
+            QMessageBox.warning(self, "Error", "Session Manager no disponible")
+            return
+        
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Guardar sesión", "Nombre de la sesión:")
+        
+        if ok and name:
+            self.session_manager.save_named_session(name)
+    
+    def show_session_manager(self):
+        """Mostrar gestor de sesiones"""
+        if not self.session_manager:
+            QMessageBox.warning(self, "Error", "Session Manager no disponible")
+            return
+        
+        self.session_manager.show_session_manager_dialog()
+    
+    def show_userscript_manager(self):
+        """Mostrar gestor de UserScripts"""
+        if hasattr(self, 'userscript_manager') and self.userscript_manager:
+            dialog = UserScriptDialog(self.userscript_manager, self)
+            dialog.exec()
+        else:
+            QMessageBox.warning(
+                self,
+                "UserScript Manager no disponible",
+                "El gestor de UserScripts no está inicializado."
+            )
+    
     def view_page_source(self):
         """Ver código fuente de la página"""
         current_browser = self.tab_manager.tabs.currentWidget()
@@ -2702,13 +3605,118 @@ class MainWindow(QMainWindow):
     
     def show_settings(self):
         """Mostrar panel de configuración"""
-        QMessageBox.information(self, "Ajustes",
-            "Panel de configuración\n\n"
-            "Características disponibles:\n"
-            "• Gestión de plugins y extensiones\n"
-            "• Configuración de privacidad\n"
-            "• Gestión de contraseñas\n"
-            "• Historial y marcadores")
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QWidget, QLabel
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configuración - Scrapelio")
+        dialog.setMinimumSize(600, 500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        tabs = QTabWidget()
+        
+        # Tab 1: General
+        general_tab = QWidget()
+        general_layout = QVBoxLayout(general_tab)
+        general_layout.addWidget(QLabel("Configuración general del navegador"))
+
+        # Página de inicio
+        if hasattr(self, 'homepage_manager') and self.homepage_manager:
+            homepage_section = QGroupBox("Página de inicio y nuevas pestañas")
+            homepage_layout = QVBoxLayout()
+
+            # Botón para configurar página de inicio
+            homepage_btn = QPushButton("⚙️ Configurar página de inicio")
+            homepage_btn.clicked.connect(lambda: self.show_homepage_settings(dialog))
+            homepage_btn.setMaximumWidth(250)
+            homepage_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 16px;
+                    background-color: #f0f0f0;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #e0e0e0;
+                }
+            """)
+            homepage_layout.addWidget(homepage_btn)
+
+            # Mostrar configuración actual
+            current_type = self.homepage_manager.homepage_type
+            type_labels = {
+                'blank': 'Página en blanco',
+                'search_engine': 'Motor de búsqueda predeterminado',
+                'custom_url': f'URL personalizada: {self.homepage_manager.custom_url}',
+                'new_tab_page': 'Página de nueva pestaña'
+            }
+            current_label = QLabel(f"Actual: {type_labels.get(current_type, 'No configurada')}")
+            current_label.setStyleSheet("color: #666; font-size: 11px; margin-top: 5px;")
+            homepage_layout.addWidget(current_label)
+
+            homepage_section.setLayout(homepage_layout)
+            general_layout.addWidget(homepage_section)
+
+        general_layout.addStretch()
+        tabs.addTab(general_tab, "General")
+        
+        # Tab 2: Búsqueda
+        if hasattr(self, 'search_engine_manager') and self.search_engine_manager:
+            search_settings = SearchEngineSettingsDialog(self.search_engine_manager, dialog)
+            # Usar el contenido del diálogo como tab
+            search_tab = QWidget()
+            search_layout = QVBoxLayout(search_tab)
+            
+            # Motor predeterminado
+            default_layout = QHBoxLayout()
+            default_layout.addWidget(QLabel("Motor predeterminado:"))
+            
+            default_combo = QComboBox()
+            for engine in self.search_engine_manager.get_all_engines():
+                default_combo.addItem(engine.name, engine.id)
+            
+            current_engine = self.search_engine_manager.get_default_engine()
+            if current_engine:
+                index = default_combo.findData(current_engine.id)
+                if index >= 0:
+                    default_combo.setCurrentIndex(index)
+            
+            default_combo.currentIndexChanged.connect(
+                lambda idx: self.search_engine_manager.set_default_engine(default_combo.itemData(idx))
+            )
+            default_layout.addWidget(default_combo)
+            default_layout.addStretch()
+            
+            search_layout.addLayout(default_layout)
+            
+            # Lista de motores
+            search_layout.addWidget(QLabel("Motores disponibles:"))
+            engines_list = QListWidget()
+            for engine in self.search_engine_manager.get_all_engines():
+                engines_list.addItem(f"{engine.name} - {engine.url_template}")
+            search_layout.addWidget(engines_list)
+            
+            search_layout.addStretch()
+            tabs.addTab(search_tab, "Búsqueda")
+        
+        # Tab 3: Privacidad
+        privacy_tab = QWidget()
+        privacy_layout = QVBoxLayout(privacy_tab)
+        privacy_layout.addWidget(QLabel("Configuración de privacidad"))
+        privacy_btn = QPushButton("Abrir panel de privacidad")
+        privacy_btn.clicked.connect(lambda: self.toggle_privacy_panel())
+        privacy_layout.addWidget(privacy_btn)
+        privacy_layout.addStretch()
+        tabs.addTab(privacy_tab, "Privacidad")
+        
+        layout.addWidget(tabs)
+        
+        # Botón cerrar
+        close_btn = QPushButton("Cerrar")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
     
     def show_about(self):
         """Mostrar información acerca de"""

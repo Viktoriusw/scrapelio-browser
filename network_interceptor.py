@@ -228,6 +228,9 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         user_agent = self._get_user_agent()
         if user_agent:
             info.setHttpHeader(b'User-Agent', user_agent.encode('utf-8'))
+            # Debug: mostrar solo para la primera petición de cada página
+            if 'text/html' in url or self.request_count % 100 == 1:
+                print(f"[UA] Applying User-Agent ({self.user_agent_type}): {user_agent[:80]}...")
 
         # Agregar/modificar headers
         if self.enable_dnt:
@@ -249,6 +252,23 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
 
     def _should_block_url(self, url):
         """Verificar si una URL debe ser bloqueada"""
+
+        # ✅ WHITELIST: Dominios críticos que NUNCA deben bloquearse
+        # Estos dominios son esenciales para funcionalidad básica de sitios
+        WHITELIST_DOMAINS = [
+            'google.com',
+            'gstatic.com',      # CDN de Google (esencial para CAPTCHA)
+            'googleapis.com',   # APIs de Google
+            'recaptcha.net',    # CAPTCHA de Google
+            'googleusercontent.com',  # Contenido de Google
+        ]
+
+        # Verificar si la URL pertenece a un dominio en whitelist
+        for domain in WHITELIST_DOMAINS:
+            if domain in url:
+                return False  # ✅ NO bloquear - dominio en whitelist
+
+        # Continuar con la lógica de bloqueo normal
         for pattern_info in self.blocked_patterns:
             pattern = pattern_info['compiled']
             pattern_type = pattern_info['type']
@@ -462,12 +482,20 @@ class NetworkSettingsDialog(QDialog):
         ua_layout.addWidget(QLabel("User-Agent predefinido:"))
         ua_layout.addWidget(self.ua_combo)
 
-        # Preview del User-Agent
-        ua_layout.addWidget(QLabel("\nUser-Agent actual:"))
+        # User-Agent ACTIVO en el navegador (el que se está usando ahora)
+        ua_layout.addWidget(QLabel("\n🌐 User-Agent ACTIVO (en uso ahora):"))
+        self.ua_active = QTextEdit()
+        self.ua_active.setReadOnly(True)
+        self.ua_active.setMaximumHeight(60)
+        self.ua_active.setStyleSheet("background-color: #e8f5e9; font-family: monospace; font-size: 10px; border: 2px solid #4caf50;")
+        ua_layout.addWidget(self.ua_active)
+
+        # Preview del User-Agent seleccionado (el que se aplicará)
+        ua_layout.addWidget(QLabel("\n📝 Preview del User-Agent seleccionado:"))
         self.ua_preview = QTextEdit()
         self.ua_preview.setReadOnly(True)
-        self.ua_preview.setMaximumHeight(80)
-        self.ua_preview.setStyleSheet("background-color: #f0f0f0; font-family: monospace; font-size: 10px;")
+        self.ua_preview.setMaximumHeight(60)
+        self.ua_preview.setStyleSheet("background-color: #fff3e0; font-family: monospace; font-size: 10px; border: 2px solid #ff9800;")
         ua_layout.addWidget(self.ua_preview)
 
         # Custom User-Agent
@@ -639,6 +667,10 @@ class NetworkSettingsDialog(QDialog):
         if ua_type == 'Custom':
             self.custom_ua_input.setText(self.interceptor.custom_user_agent)
 
+        # Mostrar User-Agent ACTIVO (el que está en uso ahora)
+        active_ua = self.interceptor._get_user_agent()
+        self.ua_active.setText(f"{active_ua}\n\n(Tipo: {ua_type})")
+
         # Headers
         self.dnt_check.setChecked(self.interceptor.enable_dnt)
         self.referer_check.setChecked(self.interceptor.block_referer)
@@ -679,7 +711,17 @@ class NetworkSettingsDialog(QDialog):
         if 'Custom' in selected:
             ua = self.custom_ua_input.text() or "(vacío - se usará Chrome por defecto)"
         else:
-            ua_key = selected.split(' ')[0]  # Obtener solo "Chrome", "Firefox", etc.
+            # Mapear el texto del combo al tipo de UA
+            ua_map = {
+                'Chrome (Windows)': 'Chrome',
+                'Firefox (Windows)': 'Firefox',
+                'Brave (Windows)': 'Brave',
+                'Safari (macOS)': 'Safari',
+                'Edge (Windows)': 'Edge',
+                'Android (Mobile)': 'Android',
+                'iOS (iPhone)': 'iOS',
+            }
+            ua_key = ua_map.get(selected, 'Chrome')
             ua = NetworkInterceptor.USER_AGENTS.get(ua_key, '')
 
         self.ua_preview.setText(ua)
@@ -771,8 +813,52 @@ Patrones de bloqueo activos: {stats['patterns_count']}
     def apply_settings(self):
         """Aplicar configuración sin cerrar"""
         self.save_settings()
-        QMessageBox.information(self, "Configuración aplicada",
-                              "Los cambios han sido aplicados correctamente.")
+
+        # Actualizar el User-Agent ACTIVO para reflejar el cambio guardado
+        active_ua = self.interceptor._get_user_agent()
+        self.ua_active.setText(f"{active_ua}\n\n(Tipo: {self.interceptor.user_agent_type})")
+
+        # Actualizar el preview
+        self.update_ua_preview()
+
+        # ✅ NUEVO: Actualizar el perfil global con el nuevo User-Agent
+        if hasattr(self.parent(), 'update_global_user_agent'):
+            success = self.parent().update_global_user_agent()
+            if success:
+                print(f"[UA-APPLY] ✓ Global User-Agent profile updated successfully")
+            else:
+                print(f"[UA-APPLY] ⚠ Failed to update global User-Agent profile")
+
+        # AUTOMÁTICO: Cerrar todas las pestañas y abrir una nueva con el User-Agent actualizado
+        if hasattr(self.parent(), 'tab_manager') and self.parent().tab_manager:
+            try:
+                tab_manager = self.parent().tab_manager
+
+                # Cerrar todas las pestañas actuales
+                while tab_manager.tabs.count() > 0:
+                    tab_manager.tabs.removeTab(0)
+
+                # Abrir una nueva pestaña con el User-Agent actualizado
+                tab_manager.add_new_tab()
+
+                print(f"[UA-REFRESH] All tabs closed and new tab opened with updated User-Agent: {self.interceptor.user_agent_type}")
+
+                QMessageBox.information(self, "User-Agent actualizado",
+                                      f"✅ User-Agent cambiado a: {self.interceptor.user_agent_type}\n\n"
+                                      f"Se han cerrado todas las pestañas y se ha abierto una nueva\n"
+                                      f"con el User-Agent actualizado.\n\n"
+                                      f"Puedes verificarlo en:\n"
+                                      f"https://www.whatismybrowser.com/detect/what-is-my-user-agent")
+            except Exception as e:
+                print(f"[ERROR] Could not refresh tabs: {e}")
+                QMessageBox.warning(self, "Configuración aplicada",
+                                  "✅ Los cambios han sido aplicados.\n\n"
+                                  "⚠️ Por favor, cierra y abre las pestañas manualmente.")
+        else:
+            QMessageBox.information(self, "Configuración aplicada",
+                                  "✅ Los cambios han sido aplicados correctamente.\n\n"
+                                  "⚠️ Cierra las pestañas actuales y abre nuevas\n"
+                                  "para que el nuevo User-Agent se aplique.")
 
     def accept_settings(self):
         """Guardar y cerrar"""
@@ -798,13 +884,27 @@ Patrones de bloqueo activos: {stats['patterns_count']}
 
         if self.interceptor.user_agent_type == 'Custom':
             self.interceptor.custom_user_agent = self.custom_ua_input.text()
+        else:
+            self.interceptor.custom_user_agent = ''
 
         # Headers
         self.interceptor.enable_dnt = self.dnt_check.isChecked()
         self.interceptor.block_referer = self.referer_check.isChecked()
         self.interceptor.enable_logging = self.logging_check.isChecked()
 
-        # Guardar en base de datos
+        # Guardar TODA la configuración en la base de datos (una sola vez)
         self.interceptor.save_configuration()
-
-        print(f"[OK] Network configuration saved - UA: {self.interceptor.user_agent_type}")
+        
+        # CRÍTICO: Recargar la configuración en el interceptor para que los cambios se apliquen
+        # Esto actualiza las variables en memoria del interceptor
+        self.interceptor.load_configuration()
+        
+        print(f"[NetworkSettings] ✓ Configuration saved and reloaded:")
+        print(f"  - User-Agent type: {self.interceptor.user_agent_type}")
+        if self.interceptor.user_agent_type == 'Custom':
+            print(f"  - Custom UA: {self.interceptor.custom_user_agent}")
+        else:
+            print(f"  - UA string: {self.interceptor._get_user_agent()}")
+        print(f"  - DNT: {self.interceptor.enable_dnt}")
+        print(f"  - Block Referer: {self.interceptor.block_referer}")
+        print(f"  - Logging: {self.interceptor.enable_logging}")
