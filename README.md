@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo2.png" alt="Scrapelio Browser" width="220" />
+  <img src="logo2.jpg" alt="Scrapelio Browser" width="220" />
 </p>
 
 ## Scrapelio Browser
