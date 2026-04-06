@@ -37,7 +37,9 @@
     "panel_background": "#2B2D30",
     "panel_header": "#3C3F41",
     "card_background": "#3C3F41",
-    "card_border": "#5F6368"
+    "card_border": "#5F6368",
+    "icon_color": "#9AA0A6",
+    "glow_accent": "#8AB4F8"
   },
   "fonts": {
     "family": "Segoe UI, Arial, sans-serif",
@@ -60,6 +62,8 @@
   "effects": {
     "glow": false,
     "neon": false,
-    "scan_lines": false
+    "scan_lines": false,
+    "glow_intensity": 0,
+    "hover_brightness": 0
   }
 }

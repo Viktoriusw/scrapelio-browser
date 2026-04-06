@@ -307,6 +307,13 @@ class TabGroupsPanel(QWidget):
         self.group_manager.group_created.connect(self.on_group_created)
         self.group_manager.group_deleted.connect(self.on_group_deleted)
         self.group_manager.group_updated.connect(self.on_group_updated)
+        # También reaccionar cuando cambian las pestañas dentro de un grupo
+        self.group_manager.tab_added_to_group.connect(
+            lambda group_id, tab_index: self.on_group_updated(group_id)
+        )
+        self.group_manager.tab_removed_from_group.connect(
+            lambda group_id, tab_index: self.on_group_updated(group_id)
+        )
 
     def create_group(self):
         """Crear nuevo grupo"""

@@ -8,11 +8,12 @@ Características:
 - Nivel de zoom
 - Estado de carga
 - Información de certificados
+- NavbarLoadingBar: barra de progreso de 2px en navbar
 """
 
 from PySide6.QtWidgets import (QStatusBar, QLabel, QWidget, QHBoxLayout,
-                               QPushButton, QMessageBox)
-from PySide6.QtCore import Qt, QUrl
+                               QPushButton, QMessageBox, QFrame)
+from PySide6.QtCore import Qt, QUrl, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QCursor
 
 
@@ -218,3 +219,96 @@ class ModernStatusBar(QStatusBar):
     def show_message(self, message, timeout=3000):
         """Mostrar mensaje temporal en la status bar"""
         self.showMessage(message, timeout)
+
+
+# ─── NavbarLoadingBar ─────────────────────────────────────────────────────────
+
+class NavbarLoadingBar(QFrame):
+    """
+    Barra de progreso de carga — línea de 2px en la parte superior de la navbar.
+
+    Uso:
+        bar = NavbarLoadingBar(navbar_widget)
+        # Conectar a señales del QWebEngineView:
+        web_view.loadStarted.connect(bar.on_load_started)
+        web_view.loadProgress.connect(bar.on_load_progress)
+        web_view.loadFinished.connect(bar.on_load_finished)
+    """
+
+    _ACCENT = "#4B9EFF"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(2)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._progress = 0
+
+        self.setStyleSheet(
+            f"QFrame {{ background: {self._ACCENT}; border: none; }}"
+        )
+        self.hide()
+
+        # Animación de progreso (valor lógico 0–100)
+        self._prog_anim = QPropertyAnimation(self, b"_bar_progress")
+        self._prog_anim.setDuration(300)
+        self._prog_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        # Animación de fade-out al finalizar
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        self._opacity = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity)
+        self._fade_anim = QPropertyAnimation(self._opacity, b"opacity")
+        self._fade_anim.setDuration(300)
+        self._fade_anim.finished.connect(self.hide)
+
+    def _get_progress(self) -> int:
+        return self._progress
+
+    def _set_progress(self, value: int):
+        self._progress = value
+        self._update_width()
+
+    _bar_progress = property(_get_progress, _set_progress)  # type: ignore
+
+    def _update_width(self):
+        parent = self.parentWidget()
+        if parent:
+            total = parent.width()
+            w = int(total * self._progress / 100)
+            self.setFixedWidth(max(0, w))
+
+    def resizeEvent(self, event):
+        self._update_width()
+        super().resizeEvent(event)
+
+    # ── API pública ────────────────────────────────────────────────────────────
+
+    def on_load_started(self):
+        """Llamar cuando comienza la carga (loadStarted signal)."""
+        self._fade_anim.stop()
+        self._opacity.setOpacity(1.0)
+        self._set_progress(0)
+        self.show()
+        self.raise_()
+        self._animate_to(15)  # Arranque inmediato hasta 15%
+
+    def on_load_progress(self, progress: int):
+        """Llamar con el progreso de carga 0-100 (loadProgress signal)."""
+        self._animate_to(min(95, progress))  # No llegar a 100 hasta finish
+
+    def on_load_finished(self, ok: bool):
+        """Llamar cuando termina la carga (loadFinished signal)."""
+        self._animate_to(100)
+        # Fade out tras 300ms
+        QTimer.singleShot(300, self._fade_out)
+
+    def _animate_to(self, target: int):
+        self._prog_anim.stop()
+        self._prog_anim.setStartValue(self._progress)
+        self._prog_anim.setEndValue(target)
+        self._prog_anim.start()
+
+    def _fade_out(self):
+        self._fade_anim.setStartValue(1.0)
+        self._fade_anim.setEndValue(0.0)
+        self._fade_anim.start()

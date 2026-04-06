@@ -238,91 +238,118 @@ class SearchEngineManager(QObject):
 
 
 class SearchEngineButton(QToolButton):
-    """Botón selector de motor de búsqueda para la barra de URL"""
-    
+    """
+    Botón selector de motor de búsqueda para la barra de URL.
+    Muestra search.svg temático + nombre del motor activo.
+    """
+
     engine_selected = Signal(str)  # engine_id
-    
+
+    # Colores para los estados del icono
+    _ICON_COLOR_NORMAL = "#A0A0A0"
+    _ICON_COLOR_HOVER  = "#F0F0F0"
+
     def __init__(self, search_manager, parent=None):
         super().__init__(parent)
         self.search_manager = search_manager
-        
-        # Configurar botón
+        self._current_icon_color = self._ICON_COLOR_NORMAL
+
         self.setPopupMode(QToolButton.InstantPopup)
         self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.setFixedHeight(36)
-        # ✅ Establecer ancho máximo para evitar expansión excesiva
-        self.setMaximumWidth(120)  # Máximo 120px
+        self.setFixedHeight(32)
+        self.setMaximumWidth(130)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Cambiar motor de búsqueda")
+
+        self._apply_style()
+        self.setup_menu()
+        self.update_display()
+        self.search_manager.default_engine_changed.connect(self.update_display)
+
+    def _apply_style(self):
         self.setStyleSheet("""
             QToolButton {
-                background-color: transparent;
+                background: transparent;
                 border: none;
-                padding: 4px 8px;
                 border-radius: 4px;
+                padding: 2px 6px;
+                color: #A0A0A0;
+                font-size: 12px;
             }
             QToolButton:hover {
-                background-color: rgba(0, 0, 0, 0.05);
+                background: rgba(255,255,255,0.08);
+                color: #F0F0F0;
             }
             QToolButton::menu-indicator {
                 image: none;
                 width: 0px;
             }
         """)
-        
-        # Crear menú
-        self.setup_menu()
-        
-        # Actualizar icono y texto
-        self.update_display()
-        
-        # Conectar señal de cambio de motor predeterminado
-        self.search_manager.default_engine_changed.connect(self.update_display)
-    
+
     def setup_menu(self):
-        """Configurar menú de motores de búsqueda"""
+        """Configurar menú de motores de búsqueda."""
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
-                background-color: white;
-                border: 1px solid #ccc;
-                padding: 5px 0px;
+                background: #222222;
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 6px;
+                padding: 4px 0px;
             }
             QMenu::item {
-                padding: 8px 25px;
-                color: #333;
+                padding: 7px 20px;
+                color: #F0F0F0;
+                font-size: 13px;
             }
             QMenu::item:selected {
-                background-color: #e8eaed;
+                background: #303030;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: rgba(255,255,255,0.08);
+                margin: 2px 8px;
             }
         """)
-        
-        # Agregar cada motor de búsqueda
+
         for engine in self.search_manager.get_all_engines():
             action = menu.addAction(engine.name)
             action.setData(engine.id)
-            action.triggered.connect(lambda checked, eid=engine.id: self.select_engine(eid))
-        
+            action.triggered.connect(
+                lambda checked=False, eid=engine.id: self.select_engine(eid)
+            )
+
         menu.addSeparator()
-        
-        # Opción para gestionar motores
-        manage_action = menu.addAction("Gestionar motores de búsqueda...")
+        manage_action = menu.addAction("Gestionar motores...")
         manage_action.triggered.connect(self.show_settings)
-        
         self.setMenu(menu)
-    
-    def select_engine(self, engine_id):
-        """Seleccionar motor de búsqueda para esta búsqueda"""
+
+    def select_engine(self, engine_id: str):
         self.engine_selected.emit(engine_id)
-    
+
     def update_display(self):
-        """Actualizar icono y texto del botón"""
+        """Actualiza icono y texto con el motor activo."""
         engine = self.search_manager.get_default_engine()
         if engine:
-            self.setText(engine.name)
-            # TODO: Cargar icono si existe
-            # self.setIcon(QIcon(f"icons/search/{engine.icon_name}"))
-    
+            self.setText(engine.name[:12])
+        self._refresh_icon(self._current_icon_color)
+
+    def _refresh_icon(self, color: str):
+        """Reconstruye el icono search.svg con el color dado."""
+        try:
+            from ui.core.strip_icons import build_nav_icon, NAV_ICON_SIZE
+            icon = build_nav_icon("search", color, NAV_ICON_SIZE)
+            if not icon.isNull():
+                self.setIcon(icon)
+                self.setIconSize(NAV_ICON_SIZE)
+        except Exception:
+            pass
+
+    def refresh_theme_icon(self, color: str):
+        """Llamar externamente cuando cambia el tema para actualizar el color."""
+        self._current_icon_color = color
+        self._refresh_icon(color)
+
     def show_settings(self):
-        """Mostrar diálogo de configuración"""
         dialog = SearchEngineSettingsDialog(self.search_manager, self.parent())
         dialog.exec()
 

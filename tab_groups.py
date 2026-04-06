@@ -210,8 +210,9 @@ class TabGroupManager(QObject):
         # Agregar al grupo
         self.groups[group_id].add_tab(tab_index)
 
-        # Emitir señal
+        # Emitir señales
         self.tab_added_to_group.emit(group_id, tab_index)
+        self.group_updated.emit(group_id)
 
         # Guardar cambios
         self.save_groups()
@@ -225,8 +226,9 @@ class TabGroupManager(QObject):
 
         self.groups[group_id].remove_tab(tab_index)
 
-        # Emitir señal
+        # Emitir señales
         self.tab_removed_from_group.emit(group_id, tab_index)
+        self.group_updated.emit(group_id)
 
         # Guardar cambios
         self.save_groups()
@@ -239,6 +241,7 @@ class TabGroupManager(QObject):
             if group.has_tab(tab_index):
                 group.remove_tab(tab_index)
                 self.tab_removed_from_group.emit(group_id, tab_index)
+                self.group_updated.emit(group_id)
 
         self.save_groups()
 

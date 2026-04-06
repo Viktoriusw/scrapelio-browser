@@ -67,21 +67,7 @@ import webbrowser
 
 
 import logging
-
-
-
-
-
-
-
-# Configurar logging
-
-
-
-logging.basicConfig(level=logging.INFO)
-
-
-
+# Logging configurado en main.py
 logger = logging.getLogger(__name__)
 
 
@@ -1462,7 +1448,7 @@ class LoginDialog(QDialog):
 
 
 
-        webbrowser.open("http://192.168.1.175:4321/auth/recuperar")
+        webbrowser.open("http://192.168.1.174:4321/auth/recuperar")
 
 
 
@@ -2334,7 +2320,7 @@ class AccountInfoWidget(QWidget):
 
 
 
-        webbrowser.open("http://192.168.1.175:4321/app/dashboard")
+        webbrowser.open("http://192.168.1.174:4321/app/dashboard")
 
 
 
@@ -2473,11 +2459,7 @@ class AuthPanel(BasePanel):
 
 
 
-        
-
-
-
-        self.setup_ui()
+        # setup_ui() ya fue invocado por BasePanel.__init__ → no repetir
 
 
 

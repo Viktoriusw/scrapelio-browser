@@ -3,15 +3,19 @@
 Favorites Bar - Complete implementation similar to Firefox/Chrome
 """
 
-from PySide6.QtWidgets import (QToolBar, QMenu, QDialog, QVBoxLayout, 
-                               QHBoxLayout, QLabel, QLineEdit, QComboBox, 
-                               QPushButton, QMessageBox, QCheckBox, QWidget)
+from PySide6.QtWidgets import (QToolBar, QMenu, QDialog, QVBoxLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QComboBox,
+                               QPushButton, QMessageBox, QCheckBox, QWidget,
+                               QToolButton)
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QIcon, QPixmap, QAction
 import sqlite3
 import os
 from urllib.parse import urlparse
 import urllib.request
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_favicon_icon(url, favicon_cache=None):
     """
@@ -33,7 +37,7 @@ def get_favicon_icon(url, favicon_cache=None):
         
         # Default favicon
         try:
-            default_icon = QIcon("icons/bookmark.png")
+            default_icon = QIcon("icons/bookmark.svg")
             if default_icon.isNull():
                 # Create a simple icon if no file exists
                 pixmap = QPixmap(16, 16)
@@ -49,8 +53,8 @@ def get_favicon_icon(url, favicon_cache=None):
         return default_icon
         
     except Exception as e:
-        print(f"Error getting favicon: {e}")
-        return QIcon("icons/bookmark.png")
+        logger.error(f"Error getting favicon for URL %s: %s", url, e)
+        return QIcon("icons/bookmark.svg")
 
 def get_favicon_pixmap(url, favicon_cache=None):
     """
@@ -126,7 +130,7 @@ class FavoriteDialog(QDialog):
             
             conn.close()
         except Exception as e:
-            print(f"Error loading categories: {e}")
+            logger.error("Error loading favorite categories from bookmarks.db: %s", e)
     
     def get_values(self):
         """Gets values from the dialog"""
@@ -150,24 +154,30 @@ class FavoritesBar(QToolBar):
         # Configure the bar
         self.setMovable(True)
         self.setFloatable(True)
-        self.setIconSize(QPixmap(14, 14).size())  # Ajustado para coincidir con sidebar (14x14)
-        
-        # Aplicar estilo CSS para que los botones coincidan con el sidebar (36x36)
+        self.setIconSize(QPixmap(16, 16).size())
+        # Sin restricción de altura máxima: la barra se ajusta a su contenido.
+        # Los botones de carpeta (QToolButton añadidos con addWidget) tienen
+        # su propio stylesheet con padding generoso.
         self.setStyleSheet("""
             QToolBar {
                 spacing: 2px;
-                padding: 0px;
-            }
-            QToolButton {
-                width: 36px;
-                height: 36px;
-                padding: 0px;
-                margin: 0px;
+                padding: 2px 6px;
                 border: none;
             }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
+            QToolBar::separator {
+                width: 1px;
+                background: rgba(128,128,128,0.35);
+                margin: 4px 3px;
+            }
+            QToolButton {
+                min-width: 24px;
+                padding: 4px 6px;
+                margin: 0px;
+                border: none;
                 border-radius: 4px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.12);
             }
         """)
         
@@ -211,7 +221,7 @@ class FavoritesBar(QToolBar):
             self.add_add_favorite_action()
             
         except Exception as e:
-            print(f"Error loading favorites: {e}")
+            logger.error("Error loading favorites for favorites bar: %s", e)
     
     def add_favorite_to_bar(self, title, url):
         """Adds a favorite to the bar"""
@@ -232,7 +242,7 @@ class FavoritesBar(QToolBar):
             self.addAction(action)
             
         except Exception as e:
-            print(f"Error adding favorite to bar: {e}")
+            logger.error("Error adding favorite '%s' (%s) to bar: %s", title, url, e)
     
     def create_favorite_menu(self, title, url):
         """Creates the context menu for a favorite"""
@@ -289,7 +299,7 @@ class FavoritesBar(QToolBar):
                         self.save_favorite(values)
                         
         except Exception as e:
-            print(f"Error adding current page: {e}")
+            logger.error("Error adding current page to favorites: %s", e)
     
     def save_favorite(self, values):
         """Saves a favorite to the database"""
@@ -316,6 +326,7 @@ class FavoritesBar(QToolBar):
             QMessageBox.information(self, "Success", "Favorite saved successfully")
             
         except Exception as e:
+            logger.error("Error saving favorite to bookmarks.db: %s", e)
             QMessageBox.critical(self, "Error", f"Error saving favorite: {e}")
     
     def edit_favorite(self, title, url):
@@ -345,6 +356,7 @@ class FavoritesBar(QToolBar):
             conn.close()
             
         except Exception as e:
+            logger.error("Error editing favorite '%s' (%s): %s", title, url, e)
             QMessageBox.critical(self, "Error", f"Error editing favorite: {e}")
     
     def update_favorite(self, old_url, values):
@@ -373,6 +385,7 @@ class FavoritesBar(QToolBar):
             QMessageBox.information(self, "Success", "Favorite updated successfully")
             
         except Exception as e:
+            logger.error("Error updating favorite %s -> %s: %s", old_url, values.get('url'), e)
             QMessageBox.critical(self, "Error", f"Error updating favorite: {e}")
     
     def remove_from_bar(self, title, url):
@@ -398,6 +411,7 @@ class FavoritesBar(QToolBar):
             QMessageBox.information(self, "Success", "Favorite removed from bar")
             
         except Exception as e:
+            logger.error("Error removing favorite '%s' (%s) from bar: %s", title, url, e)
             QMessageBox.critical(self, "Error", f"Error removing favorite from bar: {e}")
     
     def delete_favorite(self, title, url):
@@ -424,6 +438,7 @@ class FavoritesBar(QToolBar):
                 QMessageBox.information(self, "Success", "Favorite deleted successfully")
                 
             except Exception as e:
+                logger.error("Error deleting favorite '%s' (%s): %s", title, url, e)
                 QMessageBox.critical(self, "Error", f"Error deleting favorite: {e}")
     
     def open_in_new_tab(self, url):
@@ -433,7 +448,7 @@ class FavoritesBar(QToolBar):
             if hasattr(main_window, 'tab_manager'):
                 main_window.tab_manager.add_new_tab(url)
         except Exception as e:
-            print(f"Error opening in new tab: {e}")
+            logger.error("Error opening favorite in new tab (%s): %s", url, e)
     
     def get_favicon(self, url):
         """Gets the favicon for a URL"""
@@ -441,4 +456,142 @@ class FavoritesBar(QToolBar):
     
     def refresh_favorites(self):
         """Updates the favorites bar"""
-        self.load_favorites() 
+        self.load_favorites()
+
+    # ─── Integración con el sistema de carpetas ───────────────────────────────
+
+    def load_with_folders(self, folders_manager) -> None:
+        """
+        Recarga la barra mostrando primero las carpetas como botones con
+        submenú desplegable y después los marcadores sueltos de la raíz.
+
+        Debe llamarse cuando el sistema de carpetas está disponible, en lugar
+        de (o además de) load_favorites().
+
+        Args:
+            folders_manager: Instancia de FoldersManager.
+        """
+        try:
+            self.clear()
+
+            hierarchy = folders_manager.get_hierarchy()
+
+            # Subcarpetas de la raíz → botón con submenú
+            for sub in hierarchy.get("children_folders", []):
+                self._add_folder_button(sub)
+
+            # Marcadores directamente en la raíz
+            for bm in hierarchy.get("children_bookmarks", []):
+                self.add_favorite_to_bar(bm["title"], bm["url"])
+
+            # Separador + botón de añadir
+            self.addSeparator()
+            self.add_add_favorite_action()
+
+        except Exception as e:
+            logger.error("Error cargando barra de favoritos con carpetas: %s", e)
+            # Fallback al sistema anterior
+            self.load_favorites()
+
+    _FOLDER_MENU_STYLE = """
+        QMenu {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            border: 1px solid #313244;
+            border-radius: 6px;
+            padding: 4px;
+            font-size: 13px;
+        }
+        QMenu::item {
+            padding: 5px 20px 5px 10px;
+            border-radius: 4px;
+        }
+        QMenu::item:selected {
+            background-color: #45475a;
+        }
+        QMenu::separator {
+            height: 1px;
+            background-color: #313244;
+            margin: 4px 8px;
+        }
+    """
+
+    def _add_folder_button(self, folder_node: dict) -> None:
+        """
+        Añade un QToolButton a la barra que despliega un submenú con los
+        contenidos de la carpeta al hacer clic (sin flecha desplegable).
+        """
+        try:
+            _menu_style = self._FOLDER_MENU_STYLE
+
+            submenu = QMenu(folder_node["name"], self)
+            submenu.setStyleSheet(_menu_style)
+            self._build_folder_submenu(submenu, folder_node)
+
+            btn = QToolButton(self)
+            label = folder_node["name"].upper()
+            btn.setText(label)
+            btn.setToolTip(folder_node["name"])
+            btn.setMenu(submenu)
+            # InstantPopup: click directo → menú, sin flecha lateral
+            btn.setPopupMode(QToolButton.InstantPopup)
+
+            btn.setStyleSheet("""
+                QToolButton {
+                    background: transparent;
+                    border: none;
+                    padding: 4px 10px;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 0.8px;
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(255,255,255,0.12);
+                }
+                QToolButton:pressed {
+                    background-color: rgba(255,255,255,0.20);
+                }
+                QToolButton::menu-indicator {
+                    width: 0px;
+                    height: 0px;
+                    image: none;
+                }
+            """)
+
+            # Forzar ancho suficiente para el texto completo.
+            # sizeHint() no es fiable antes de mostrar el widget, así que
+            # calculamos directamente con QFontMetrics.
+            from PySide6.QtGui import QFontMetrics
+            fm = QFontMetrics(btn.font())
+            text_px = fm.horizontalAdvance(label)
+            btn.setMinimumWidth(text_px + 24)   # padding izq+der = 2×10 + 4 extra
+
+            self.addWidget(btn)
+
+        except Exception as e:
+            logger.error("Error añadiendo botón de carpeta '%s': %s", folder_node.get("name"), e)
+
+    def _build_folder_submenu(self, menu: QMenu, folder_node: dict) -> None:
+        """
+        Rellena *menu* de forma recursiva con las subcarpetas y marcadores
+        de *folder_node*.
+        """
+        # Subcarpetas → submenús anidados
+        for sub in folder_node.get("children_folders", []):
+            submenu = menu.addMenu(f"📁 {sub['name']}")
+            submenu.setStyleSheet(self._FOLDER_MENU_STYLE)
+            self._build_folder_submenu(submenu, sub)
+
+        # Marcadores de esta carpeta
+        bms = folder_node.get("children_bookmarks", [])
+        if folder_node.get("children_folders") and bms:
+            menu.addSeparator()
+
+        for bm in bms:
+            url = bm["url"]
+            title = bm["title"]
+            icon = self.get_favicon(url)
+            action = menu.addAction(icon, title)
+            action.setToolTip(f"{title}\n{url}")
+            action.triggered.connect(lambda _checked=False, u=url: self.favorite_clicked.emit(u))

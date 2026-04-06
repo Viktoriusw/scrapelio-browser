@@ -50,6 +50,23 @@
       "download_url": "http://192.168.1.175:8000/api/plugins/proxy/download",
       "info_url": "http://192.168.1.175:8000/api/plugins/proxy/info"
     },
+    "tor": {
+      "name": "Tor Network",
+      "version": "1.0.0",
+      "author": "Scrapelio Team",
+      "description": "Navegación anónima via red Tor. Conecta a la red Tor para enrutar todo el tráfico de forma segura.",
+      "premium": false,
+      "category": "network",
+      "tags": ["tor", "privacy", "anonymity", "security"],
+      "features": ["Tor integration", "New identity", "Bootstrap progress"],
+      "requirements": {
+        "min_browser_version": "1.0.0",
+        "dependencies": ["stem"]
+      },
+      "permissions": ["network_access"],
+      "icon": "icons/tor_off.png",
+      "type": "native"
+    },
     "themes": {
       "name": "Advanced Theme System",
       "version": "1.0.0",

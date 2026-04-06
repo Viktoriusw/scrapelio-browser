@@ -46,7 +46,6 @@ def browser_theme_processor(theme_data: dict) -> str:
     
     #urlBar:focus {{
         border-color: {colors.get('accent', '#0078d4')};
-        box-shadow: 0 0 0 2px {colors.get('accent', '#0078d4')}33;
     }}
     
     /* Tabs del navegador */

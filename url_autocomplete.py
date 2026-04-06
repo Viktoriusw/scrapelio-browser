@@ -10,7 +10,7 @@ Características:
 - Predicción inteligente
 """
 
-from PySide6.QtCore import Qt, Signal, QObject, QTimer, QStringListModel
+from PySide6.QtCore import Qt, Signal, QObject, QTimer, QStringListModel, QEvent
 from PySide6.QtWidgets import (QCompleter, QListView, QStyledItemDelegate,
                                QStyle, QApplication)
 from PySide6.QtGui import QFont, QPalette, QColor, QPainter, QIcon
@@ -173,13 +173,72 @@ class UrlAutocompleteSystem(QObject):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.update_suggestions)
 
-        # Conectar eventos
-        self.url_bar.textChanged.connect(self.on_text_changed)
+        # Usar textEdited (sólo dispara con entrada del usuario, NO cuando se cambia
+        # programáticamente al navegar o cambiar de pestaña)
+        self.url_bar.textEdited.connect(self.on_text_changed)
         self.completer.activated.connect(self.on_suggestion_selected)
+
+        # Instalar event filter para mostrar historial reciente al hacer clic
+        self.url_bar.installEventFilter(self)
+        self._focus_was_from_mouse = False
 
         # Cache de sugerencias
         self.suggestions_cache = []
         self.last_query = ""
+
+    def eventFilter(self, obj, event):
+        """Detectar clic en la barra para mostrar historial reciente."""
+        if obj is self.url_bar:
+            if event.type() == QEvent.MouseButtonPress:
+                self._focus_was_from_mouse = True
+            elif event.type() == QEvent.FocusIn and self._focus_was_from_mouse:
+                self._focus_was_from_mouse = False
+                QTimer.singleShot(50, self._show_recent_on_focus)
+            elif event.type() == QEvent.FocusOut:
+                self._focus_was_from_mouse = False
+        return super().eventFilter(obj, event)
+
+    def _show_recent_on_focus(self):
+        """Mostrar las URLs más recientes al hacer clic en la barra."""
+        if not self.url_bar.hasFocus():
+            return
+        # Solo si la barra está en blanco o seleccionada al completo (click para editar)
+        recents = self._get_recent_history(8)
+        if not recents:
+            return
+        self.model.setStringList([item.url for item in recents])
+        for i, item in enumerate(recents):
+            idx = self.model.index(i, 0)
+            self.model.setData(idx, item.url, Qt.UserRole)
+            self.model.setData(idx, item.type, Qt.UserRole + 1)
+            self.model.setData(idx, item.title, Qt.UserRole + 2)
+        self.completer.complete()
+
+    def _get_recent_history(self, limit=8):
+        """Obtener las URLs visitadas más recientemente."""
+        suggestions = []
+        try:
+            if hasattr(self.history_manager, 'history') and self.history_manager.history:
+                for entry in reversed(self.history_manager.history):
+                    url = entry.get('url', '')
+                    if not url:
+                        continue
+                    timestamp = entry.get('timestamp', None)
+                    item = AutocompleteItem(
+                        text=url,
+                        url=url,
+                        item_type=AutocompleteItem.TYPE_HISTORY,
+                        title=entry.get('title', url) or url,
+                        visit_count=1,
+                        last_visit=timestamp.isoformat() if timestamp else None,
+                    )
+                    item.calculate_score()
+                    suggestions.append(item)
+                    if len(suggestions) >= limit:
+                        break
+        except Exception:
+            pass
+        return suggestions
 
     def on_text_changed(self, text):
         """Manejar cambios en el texto de la barra de URL"""

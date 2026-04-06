@@ -47,6 +47,7 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
+        self.tor_mode = False
 
         # Configuración
         self.config_db = self._get_config_db_path()
@@ -206,6 +207,13 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         Args:
             info: Información de la petición
         """
+        # Bloqueo WebRTC en modo Tor
+        if getattr(self, 'tor_mode', False):
+            url = info.requestUrl().toString()
+            if any(p in url for p in ('stun:', 'turn:', 'stuns:', 'turns:')):
+                info.block(True)
+                return
+
         url = info.requestUrl().toString()
         method = info.requestMethod().data().decode('utf-8')
 
@@ -236,8 +244,25 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         if self.enable_dnt:
             info.setHttpHeader(b'DNT', b'1')
 
+        # No bloquear Referer en peticiones de medios: CDNs de vídeo (phncdn, etc.)
+        # requieren Referer para servir contenido; si se elimina → 403 → MediaError UNKNOWN_ERROR
         if self.block_referer:
-            info.setHttpHeader(b'Referer', b'')
+            try:
+                rt = info.resourceType()
+                media_type = getattr(
+                    QWebEngineUrlRequestInfo.ResourceType, 'ResourceTypeMedia',
+                    getattr(QWebEngineUrlRequestInfo.ResourceType, 'Media', None)
+                )
+                xhr_type = getattr(
+                    QWebEngineUrlRequestInfo.ResourceType, 'ResourceTypeXmlHttpRequest',
+                    getattr(QWebEngineUrlRequestInfo.ResourceType, 'XmlHttpRequest', None)
+                )
+                is_media = media_type and rt == media_type
+                is_media_xhr = xhr_type and rt == xhr_type and self._is_media_url(url)
+                if not (is_media or is_media_xhr):
+                    info.setHttpHeader(b'Referer', b'')
+            except Exception:
+                info.setHttpHeader(b'Referer', b'')
 
         # Headers personalizados
         for header_name, header_value in self.custom_headers.items():
@@ -250,6 +275,13 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         # Emitir señal
         self.request_intercepted.emit(url, method)
 
+    def _is_media_url(self, url: str) -> bool:
+        """Indica si la URL parece ser de contenido multimedia (vídeo/audio)."""
+        url_lower = url.lower()
+        media_ext = ('.mp4', '.m3u8', '.ts', '.webm', '.mpd', '.m4s', '.m4a')
+        media_hints = ('phncdn', 'googlevideo', '/video/', '/media/', '/stream/', 'cloudfront')
+        return any(ext in url_lower for ext in media_ext) or any(h in url_lower for h in media_hints)
+
     def _should_block_url(self, url):
         """Verificar si una URL debe ser bloqueada"""
 
@@ -261,6 +293,7 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             'googleapis.com',   # APIs de Google
             'recaptcha.net',    # CAPTCHA de Google
             'googleusercontent.com',  # Contenido de Google
+            'phncdn.com',       # CDN de vídeo (evitar bloquear reproducción)
         ]
 
         # Verificar si la URL pertenece a un dominio en whitelist

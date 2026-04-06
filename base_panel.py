@@ -1,21 +1,14 @@
 #!/usr/bin/env python3
+"""
+Base Panel - Base class for reusable tabbed panels.
 
+Provides ScrapelioPanelBase with consistent header, section system
+and theme support.
 """
 
-Base Panel - Base class for reusable tabbed panels
-
-Eliminates code duplication in setup_ui of different panels
-
-"""
-
-
-
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QHBoxLayout, 
-
-                               QGroupBox, QPushButton, QLabel)
-
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QHBoxLayout,
+                               QGroupBox, QPushButton, QLabel, QFrame)
 from PySide6.QtCore import Qt, QSettings
-
 from typing import List, Tuple, Callable, Dict, Any
 
 # Import theme system
@@ -28,6 +21,19 @@ except ImportError:
         return "#000000"
     def get_theme_engine():
         return None
+
+# Design tokens (fallback independiente del motor de temas)
+_DARK_TOKENS = {
+    "surface_0":      "#1A1A1A",
+    "surface_1":      "#222222",
+    "surface_hover":  "#303030",
+    "border":         "rgba(255,255,255,0.08)",
+    "text_primary":   "#F0F0F0",
+    "text_secondary": "#A0A0A0",
+    "accent":         "#4B9EFF",
+    "success":        "#3FB950",
+    "error":          "#F85149",
+}
 
 
 
@@ -380,10 +386,159 @@ class BasePanel(QWidget):
             """)
     
     def _on_theme_changed(self, theme_name):
-        """
-        Handle theme change signal
-        Child classes can override for additional theming
-        """
+        """Handle theme change signal. Child classes can override."""
         self.current_theme = theme_name
         self._apply_base_theme()
 
+    # ── API pública de estilo ─────────────────────────────────────────────────
+
+    def set_title(self, text: str) -> None:
+        """Actualiza el título del panel si existe un QLabel#panelTitle."""
+        for label in self.findChildren(QLabel, "panelTitle"):
+            label.setText(text.upper())
+
+    def add_section(self, label: str) -> QLabel:
+        """Añade un separador de sección con texto a la layout principal."""
+        lbl = QLabel(label.upper())
+        lbl.setStyleSheet(
+            "font-size: 10px; font-weight: 600; letter-spacing: 0.8px; "
+            "color: #606060; padding: 8px 0px 4px 0px;"
+        )
+        if self.layout():
+            self.layout().addWidget(lbl)
+        return lbl
+
+    def apply_panel_style(self, border_side: str = "left") -> None:
+        """Aplica el estilo base Arc/Brave al panel."""
+        c = _DARK_TOKENS
+        border_css = (
+            f"border-left: 1px solid {c['border']};"
+            if border_side == "left"
+            else f"border-right: 1px solid {c['border']};"
+        )
+        self.setStyleSheet(f"""
+            QWidget {{
+                background: {c['surface_0']};
+                color: {c['text_primary']};
+                font-size: 13px;
+            }}
+            QTabWidget::pane {{
+                border: none;
+                background: {c['surface_0']};
+            }}
+            QTabBar::tab {{
+                background: transparent;
+                color: {c['text_secondary']};
+                border: none;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+                min-height: 26px;
+            }}
+            QTabBar::tab:selected {{
+                background: {c['surface_1']};
+                color: {c['text_primary']};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: {c['surface_hover']};
+            }}
+            QGroupBox {{
+                background: transparent;
+                border: 1px solid {c['border']};
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 8px;
+                font-size: 11px;
+                color: {c['text_secondary']};
+            }}
+            QGroupBox::title {{
+                color: {c['text_secondary']};
+            }}
+            QScrollBar:vertical {{
+                background: transparent; width: 6px; border: none;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(255,255,255,0.12);
+                border-radius: 3px; min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(255,255,255,0.25);
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
+
+
+# ─── ScrapelioPanelBase ───────────────────────────────────────────────────────
+
+class ScrapelioPanelBase(BasePanel):
+    """
+    Clase base especializada para paneles de Scrapelio.
+
+    Añade:
+    - Header fijo de 40px con título + botón cierre
+    - Método `add_section(label)` para separadores
+    - Estilos Arc/Brave aplicados por defecto
+    - Scrollbar mínima (6px)
+    """
+
+    def __init__(self, title: str = "", border_side: str = "left", parent=None):
+        self._panel_title    = title
+        self._border_side    = border_side
+        self._close_callback = None
+        super().__init__(parent)
+        self.apply_panel_style(border_side)
+
+    def set_close_callback(self, callback) -> None:
+        """Registra el callback que se llama al cerrar el panel."""
+        self._close_callback = callback
+
+    def _make_header(self) -> QWidget:
+        """Header estándar de 40px: título uppercase + botón X."""
+        header = QWidget()
+        header.setObjectName("panelHeader")
+        header.setFixedHeight(40)
+        header.setStyleSheet(
+            f"background: {_DARK_TOKENS['surface_0']}; "
+            f"border-bottom: 1px solid {_DARK_TOKENS['border']};"
+        )
+
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(16, 0, 8, 0)
+        h_layout.setSpacing(8)
+
+        title_lbl = QLabel(self._panel_title.upper())
+        title_lbl.setObjectName("panelTitle")
+        title_lbl.setStyleSheet(
+            f"font-size: 11px; font-weight: 600; letter-spacing: 0.8px; "
+            f"color: {_DARK_TOKENS['text_secondary']}; background: transparent;"
+        )
+        h_layout.addWidget(title_lbl)
+        h_layout.addStretch()
+
+        close_btn = QPushButton("✕")
+        close_btn.setObjectName("panelClose")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none; border-radius: 4px;
+                color: #606060; font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background: rgba(248,81,73,0.15);
+                color: #F85149;
+            }}
+        """)
+        close_btn.clicked.connect(self._on_close)
+        h_layout.addWidget(close_btn)
+
+        return header
+
+    def _on_close(self):
+        if self._close_callback:
+            self._close_callback()
+        else:
+            self.hide()
+
+    def get_tab_definitions(self):
+        return []  # Subclases pueden sobrescribir

@@ -90,21 +90,7 @@ from config_manager import ConfigManager, get_config
 
 # Importar utilidades de seguridad
 from security_utils import get_token_encryption
-
-
-
-
-
-
-
-# Configurar logging
-
-
-
-logging.basicConfig(level=logging.INFO)
-
-
-
+# Logging configurado en main.py
 logger = logging.getLogger(__name__)
 
 

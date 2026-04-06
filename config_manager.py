@@ -8,7 +8,7 @@ import yaml
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, ClassVar
 from dataclasses import dataclass
 
 # Configurar logging
@@ -78,8 +78,8 @@ class ConfigManager:
     - Cache de configuración en memoria
     """
     
-    _instance = None
-    _config: Dict[str, Any] = None
+    _instance: ClassVar[Optional["ConfigManager"]] = None
+    _config: ClassVar[Optional[Dict[str, Any]]] = None
     
     def __new__(cls):
         """Singleton pattern para asegurar una sola instancia"""
@@ -173,10 +173,10 @@ class ConfigManager:
                 'license_validation': {'interval': 300, 'cache_duration': 300}
             },
             'frontend': {
-                'url': 'http://192.168.1.175:4321',
-                'registration_url': 'http://192.168.1.175:4321/auth/registro.html',
-                'login_url': 'http://192.168.1.175:4321/auth/login.html',
-                'dashboard_url': 'http://192.168.1.175:4321/app/dashboard.html'
+                'url': 'http://192.168.1.174:4321',
+                'registration_url': 'http://192.168.1.174:4321/auth/registro.html',
+                'login_url': 'http://192.168.1.174:4321/auth/login.html',
+                'dashboard_url': 'http://192.168.1.174:4321/app/dashboard.html'
             },
             'smtp': {
                 'host': 'localhost',
@@ -195,7 +195,7 @@ class ConfigManager:
             'security': {
                 'use_keyring': False,
                 'use_qsettings': True,
-                'secret_key': 'scrapelio-secret-key-change-in-production',
+                'secret_key': os.environ.get('JWT_SECRET', 'OVERRIDE_WITH_JWT_SECRET_ENV_VAR'),
                 'algorithm': 'HS256',
                 'access_token_expire_minutes': 30,
                 'refresh_token_expire_days': 7
@@ -210,6 +210,12 @@ class ConfigManager:
                 'file': 'scrapelio_browser.log',
                 'max_size': 10485760,
                 'backup_count': 3
+            },
+            'tor': {
+                'enabled': False,
+                'socks_port': 9150,
+                'control_port': 9151,
+                'pending_restore_urls': []
             }
         }
     
@@ -361,6 +367,62 @@ class ConfigManager:
     def get_raw_config(self) -> Dict[str, Any]:
         """Obtener configuración raw completa"""
         return self._config
+
+    # ============================================
+    # MÉTODOS TOR
+    # ============================================
+
+    def _ensure_tor_section(self) -> None:
+        """Asegura que la sección tor existe en la configuración."""
+        if 'tor' not in self._config:
+            self._config['tor'] = {}
+        tor = self._config['tor']
+        tor.setdefault('enabled', False)
+        tor.setdefault('socks_port', 9150)
+        tor.setdefault('control_port', 9151)
+        tor.setdefault('pending_restore_urls', [])
+
+    def get_tor_config(self) -> dict:
+        """Obtener configuración completa de Tor."""
+        self._ensure_tor_section()
+        return dict(self._config['tor'])
+
+    def is_tor_enabled(self) -> bool:
+        """Verificar si Tor está habilitado."""
+        self._ensure_tor_section()
+        return bool(self._config['tor'].get('enabled', False))
+
+    def set_tor_enabled(self, enabled: bool) -> None:
+        """Establecer si Tor está habilitado."""
+        self._ensure_tor_section()
+        self._config['tor']['enabled'] = bool(enabled)
+
+    def get_tor_pending_urls(self) -> List[str]:
+        """Obtener URLs a restaurar tras reinicio por Tor."""
+        self._ensure_tor_section()
+        urls = self._config['tor'].get('pending_restore_urls', [])
+        return list(urls) if isinstance(urls, list) else []
+
+    def set_tor_pending_urls(self, urls: List[str]) -> None:
+        """Establecer URLs a restaurar tras reinicio."""
+        self._ensure_tor_section()
+        self._config['tor']['pending_restore_urls'] = list(urls)
+
+    def clear_tor_pending_urls(self) -> None:
+        """Limpiar URLs pendientes de restaurar."""
+        self._ensure_tor_section()
+        self._config['tor']['pending_restore_urls'] = []
+
+    def persist_config(self) -> None:
+        """Persistir configuración actual al archivo YAML."""
+        try:
+            self._ensure_tor_section()
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                yaml.dump(self._config, f, default_flow_style=False, allow_unicode=True)
+            logger.info("Configuration persisted to %s", self.config_file)
+        except Exception as e:
+            logger.error("Error persisting config: %s", e)
     
     def print_config(self):
         """Imprimir configuración actual (para debugging)"""

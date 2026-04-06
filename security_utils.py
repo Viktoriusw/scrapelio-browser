@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-Utilidades de seguridad para cifrado de tokens y datos sensibles
+Utilidades de seguridad para cifrado de tokens y datos sensibles.
 """
 
-import os
 import base64
 import hashlib
+import logging
+import os
+from typing import Optional
+
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TokenEncryption:
@@ -57,44 +61,38 @@ class TokenEncryption:
             return hashlib.sha256(home.encode()).hexdigest()
     
     def encrypt(self, data: str) -> str:
-        """
-        Cifra datos sensibles
-        
+        """Cifra datos sensibles y devuelve el token Fernet como string.
+
         Args:
-            data: String a cifrar
-            
+            data: String a cifrar.
+
         Returns:
-            String cifrado en base64
+            Token cifrado Fernet (base64url) como str, o "" si falla.
         """
         if not data:
             return ""
-        
         try:
-            encrypted = self._fernet.encrypt(data.encode())
-            return base64.urlsafe_b64encode(encrypted).decode()
+            return self._fernet.encrypt(data.encode()).decode()
         except Exception as e:
-            print(f"[SECURITY] Error encrypting data: {e}")
+            logger.error("Error cifrando datos: %s", e)
             return ""
-    
+
     def decrypt(self, encrypted_data: str) -> str:
-        """
-        Descifra datos
-        
+        """Descifra un token Fernet.
+
         Args:
-            encrypted_data: String cifrado en base64
-            
+            encrypted_data: Token Fernet como str (base64url).
+
         Returns:
-            String descifrado
+            String descifrado, o "" si el token es inválido o está corrupto.
         """
         if not encrypted_data:
             return ""
-        
         try:
-            encrypted = base64.urlsafe_b64decode(encrypted_data.encode())
-            decrypted = self._fernet.decrypt(encrypted)
-            return decrypted.decode()
+            return self._fernet.decrypt(encrypted_data.encode()).decode()
         except Exception as e:
-            print(f"[SECURITY] Error decrypting data: {e}")
+            err_msg = repr(e) if not str(e) else str(e)
+            logger.debug("Error descifrando datos (token inválido/expirado): %s", err_msg)
             return ""
     
     # Alias para compatibilidad

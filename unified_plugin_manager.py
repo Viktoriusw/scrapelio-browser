@@ -95,21 +95,7 @@ from PySide6.QtWidgets import QMessageBox, QWidget
 
 
 from config_manager import ConfigManager, get_config, get_backend_url
-
-
-
-
-
-
-
-# Configurar logging
-
-
-
-logging.basicConfig(level=logging.INFO)
-
-
-
+# Logging configurado en main.py
 logger = logging.getLogger(__name__)
 
 
@@ -486,7 +472,7 @@ class PluginDownloader(QThread):
 
 
 
-            success = backend_integration.download_plugin(self.plugin_id)
+            response = backend_integration.download_plugin(self.plugin_id)
 
 
 
@@ -494,7 +480,7 @@ class PluginDownloader(QThread):
 
 
 
-            if success:
+            if response and response.success:
 
 
 
@@ -510,7 +496,8 @@ class PluginDownloader(QThread):
 
 
 
-                self.error_occurred.emit("Error descargando plugin desde el backend")
+                msg = getattr(response, 'message', None) if response else "Error desconocido"
+                self.error_occurred.emit(msg or "Error descargando plugin desde el backend")
 
 
 

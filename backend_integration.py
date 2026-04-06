@@ -95,21 +95,7 @@ from backend_schemas import (
     safe_validate,
     ValidationError
 )
-
-
-
-
-
-
-
-# Configurar logging
-
-
-
-logging.basicConfig(level=logging.INFO)
-
-
-
+# Logging configurado en main.py
 logger = logging.getLogger(__name__)
 
 
@@ -855,7 +841,7 @@ class BackendIntegration(QObject):
 
 
 
-                if response.status_code == 200:
+                if response.status_code in (200, 201):
 
 
 
@@ -869,11 +855,11 @@ class BackendIntegration(QObject):
                         if not isinstance(data, (dict, list)):
                             logger.warning(f"Unexpected response type: {type(data)}")
                             return BackendResponse(False, error=BackendError.INVALID_RESPONSE,
-                                                 status_code=200, message="Invalid response structure")
+                                                 status_code=response.status_code, message="Invalid response structure")
 
 
 
-                        return BackendResponse(True, data, status_code=200)
+                        return BackendResponse(True, data, status_code=response.status_code)
 
 
 
@@ -4469,7 +4455,7 @@ class BackendIntegration(QObject):
 
 
 
-                json={"refresh_token": self.refresh_token},
+                headers={"Authorization": f"Bearer {self.refresh_token}"},
 
 
 

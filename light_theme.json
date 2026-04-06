@@ -33,7 +33,9 @@
     "logout_button": "#D93025",
     "logout_button_hover": "#A50E0E",
     "logout_button_pressed": "#820A0A",
-    "status_success": "#188038"
+    "status_success": "#188038",
+    "icon_color": "#5F6368",
+    "glow_accent": "#1A73E8"
   },
   "fonts": {
     "family": "Segoe UI, Arial, sans-serif",
@@ -56,6 +58,8 @@
   "effects": {
     "glow": false,
     "neon": false,
-    "scan_lines": false
+    "scan_lines": false,
+    "glow_intensity": 0,
+    "hover_brightness": 0
   }
 }

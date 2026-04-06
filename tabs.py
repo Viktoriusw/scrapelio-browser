@@ -2,11 +2,11 @@ import json
 
 import os
 
-from PySide6.QtWidgets import QTabWidget, QMenu
+from PySide6.QtWidgets import QTabWidget, QTabBar, QMenu, QPushButton
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from PySide6.QtCore import QUrl, Qt, QSettings
+from PySide6.QtCore import QUrl, Qt, QSettings, Signal
 
 from PySide6.QtGui import QIcon
 
@@ -14,6 +14,112 @@ from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 
 from tab_groups import TabGroupManager
 
+
+class _NewTabButton(QPushButton):
+    """Botón '+' que se posiciona justo después de la última pestaña."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("tabBarNewTabBtn")
+        self.setFixedSize(26, 24)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Nueva pestaña (Ctrl+T)")
+        self._apply_style("#A0A0A0")
+
+    def _apply_style(self, icon_color: str = "#A0A0A0"):
+        # Intentar usar newtab.svg
+        try:
+            from ui.core.strip_icons import build_nav_icon
+            from PySide6.QtCore import QSize
+            icon = build_nav_icon("newtab", icon_color, QSize(13, 13))
+            if not icon.isNull():
+                self.setIcon(icon)
+                self.setIconSize(QSize(13, 13))
+                self.setText("")
+                self.setStyleSheet("""
+                    QPushButton#tabBarNewTabBtn {
+                        background: transparent;
+                        border: none;
+                        border-radius: 4px;
+                        padding: 0px;
+                    }
+                    QPushButton#tabBarNewTabBtn:hover {
+                        background: rgba(255,255,255,0.10);
+                    }
+                    QPushButton#tabBarNewTabBtn:pressed {
+                        background: rgba(255,255,255,0.16);
+                    }
+                """)
+                return
+        except Exception:
+            pass
+        # Fallback texto
+        self.setText("+")
+        self.setStyleSheet("""
+            QPushButton#tabBarNewTabBtn {
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+                color: #A0A0A0;
+                font-size: 17px;
+                font-weight: 300;
+                padding-bottom: 2px;
+            }
+            QPushButton#tabBarNewTabBtn:hover {
+                background: rgba(255,255,255,0.10);
+                color: #F0F0F0;
+            }
+            QPushButton#tabBarNewTabBtn:pressed {
+                background: rgba(255,255,255,0.16);
+            }
+        """)
+
+    def refresh_icon(self, color: str):
+        self._apply_style(color)
+
+
+class BrowserTabBar(QTabBar):
+    """
+    QTabBar con botón '+' integrado que se posiciona justo después
+    de la última pestaña y siempre es visible.
+    """
+
+    new_tab_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._btn = _NewTabButton(self)
+        self._btn.clicked.connect(self.new_tab_requested)
+        self._reposition()
+
+    # Reposicionar el botón en cada evento que cambie las pestañas
+    def tabLayoutChange(self):
+        super().tabLayoutChange()
+        self._reposition()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposition()
+
+    def _reposition(self):
+        """Coloca el botón '+' justo después de la última pestaña."""
+        count = self.count()
+        if count > 0:
+            last_rect = self.tabRect(count - 1)
+            x = last_rect.right() + 4
+        else:
+            x = 4
+
+        # Si no cabe, pegar al borde derecho con margen
+        max_x = self.width() - self._btn.width() - 4
+        x = min(x, max_x) if max_x > 0 else x
+
+        y = (self.height() - self._btn.height()) // 2
+        self._btn.move(x, max(y, 0))
+        self._btn.raise_()
+
+    def refresh_icon(self, color: str):
+        self._btn.refresh_icon(color)
 
 
 class TabManager:
@@ -30,6 +136,10 @@ class TabManager:
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("browserTabs")
+
+        # BrowserTabBar: barra de pestañas con botón '+' integrado
+        self._tab_bar = BrowserTabBar()
+        self.tabs.setTabBar(self._tab_bar)
 
         self.tabs.setDocumentMode(True)  # Flat tabs style
 
@@ -62,7 +172,32 @@ class TabManager:
         # Diccionario para trackear conexiones de señales y prevenir memory leaks
         self._signal_connections = {}
 
+        # Conectar botón '+' del tab bar a add_new_tab
+        self._tab_bar.new_tab_requested.connect(self.add_new_tab)
+
         # Don't create initial tab here - let ui.py handle it after session restore
+
+        # Conectar señales de grupos de pestañas con la barra de pestañas
+        try:
+            # Cuando se crea, elimina o actualiza un grupo, refrescar todas las pestañas
+            self.group_manager.group_created.connect(
+                lambda group_id: self.refresh_all_tab_appearances()
+            )
+            self.group_manager.group_deleted.connect(
+                lambda group_id: self.refresh_all_tab_appearances()
+            )
+            self.group_manager.group_updated.connect(
+                lambda group_id: self.refresh_all_tab_appearances()
+            )
+            # Cuando una pestaña entra o sale de un grupo, refrescar solo esa pestaña
+            self.group_manager.tab_added_to_group.connect(
+                lambda group_id, tab_index: self._refresh_tab_appearance(tab_index)
+            )
+            self.group_manager.tab_removed_from_group.connect(
+                lambda group_id, tab_index: self._refresh_tab_appearance(tab_index)
+            )
+        except Exception as e:
+            print(f"[TabGroups] Error connecting group signals: {e}")
 
 
 
@@ -468,6 +603,7 @@ class TabManager:
             menu.addSeparator()
 
             save_bookmark = menu.addAction("Save as Bookmark")
+            inspect_action = menu.addAction("Inspect (Inspeccionar)")
 
             action = menu.exec(browser.mapToGlobal(pos))
 
@@ -505,6 +641,11 @@ class TabManager:
                 if current_url:
 
                     self.parent.show_save_favorite_menu()
+            elif action == inspect_action:
+                if hasattr(self.parent, "devtools_dock") and self.parent.devtools_dock:
+                    self.parent.devtools_dock.set_browser(browser)
+                    self.parent.devtools_dock.show()
+                    self.parent.devtools_dock.raise_()
 
         except Exception as e:
 
@@ -859,10 +1000,18 @@ class TabManager:
 
         menu.addSeparator()
 
-        # Split View (si el plugin está disponible)
-        split_view_action = None
-        if hasattr(self.parent, 'dynamic_plugin_panels') and 'split_view' in self.parent.dynamic_plugin_panels:
-            split_view_action = menu.addAction("⫿ Abrir en Split View")
+        # Split View (mostrar siempre; habilitar si está cargado/instalado)
+        split_view_action = menu.addAction("⫿ Abrir en Split View")
+        split_view_enabled = False
+        if hasattr(self.parent, 'dynamic_plugin_panels') and 'split_view' in getattr(self.parent, 'dynamic_plugin_panels', {}):
+            split_view_enabled = True
+        elif hasattr(self.parent, 'plugin_manager') and self.parent.plugin_manager:
+            try:
+                # Si el plugin está instalado pero todavía no cargado, permitimos el intento
+                split_view_enabled = self.parent.plugin_manager.is_plugin_installed('split_view')
+            except Exception:
+                split_view_enabled = False
+        split_view_action.setEnabled(bool(split_view_enabled))
 
 
         # Ejecutar menú
@@ -918,10 +1067,24 @@ class TabManager:
                 self.close_tab(i)
 
         elif split_view_action and action == split_view_action:
-            # Abrir pestaña en Split View
-            if hasattr(self.parent, 'dynamic_plugin_panels') and 'split_view' in self.parent.dynamic_plugin_panels:
-                split_view_plugin = self.parent.dynamic_plugin_panels['split_view']
-                split_view_plugin.open_tab_in_split_view(index)
+            # Abrir pestaña en Split View (cargar plugin si hace falta)
+            try:
+                split_view_plugin = None
+                if hasattr(self.parent, 'dynamic_plugin_panels'):
+                    split_view_plugin = self.parent.dynamic_plugin_panels.get('split_view')
+
+                if not split_view_plugin and hasattr(self.parent, 'plugin_manager') and self.parent.plugin_manager:
+                    # Intentar cargarlo bajo demanda
+                    if self.parent.plugin_manager.load_plugin('split_view'):
+                        if hasattr(self.parent, 'dynamic_plugin_panels'):
+                            split_view_plugin = self.parent.dynamic_plugin_panels.get('split_view')
+
+                if split_view_plugin and hasattr(split_view_plugin, 'open_tab_in_split_view'):
+                    split_view_plugin.open_tab_in_split_view(index)
+                else:
+                    print("[TabManager] Split View plugin not available")
+            except Exception as e:
+                print(f"[TabManager] Error opening Split View: {e}")
 
 
 

@@ -6,6 +6,7 @@ Inspirado en Google Disco GenTabs: extrae contexto de todas las pestañas abiert
 lo envía a un LLM y genera aplicaciones web interactivas personalizadas.
 """
 
+import html as _html_escape
 import json
 import time
 import hashlib
@@ -15,9 +16,17 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from PySide6.QtCore import QObject, Signal, QThread, QSettings
+from llm_client import LLMClient, LLMConfig, LLMError, PROVIDER_LOCAL, PROVIDER_LLMAPI
+from constants import (
+    GENTAB_MAX_CONTENT_PER_TAB,
+    GENTAB_MAX_TOTAL_CONTEXT,
+    GENTAB_DEFAULT_TEMPERATURE,
+    GENTAB_DEFAULT_MAX_TOKENS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +78,66 @@ class GenTabResult:
 class ContentExtractor:
     """Extrae y limpia contenido de páginas web."""
 
-    MAX_CONTENT_PER_TAB = 4000
-    MAX_TOTAL_CONTEXT = 24000
+    MAX_CONTENT_PER_TAB = GENTAB_MAX_CONTENT_PER_TAB
+    MAX_TOTAL_CONTEXT = GENTAB_MAX_TOTAL_CONTEXT
+
+    _SEARCH_ENGINE_DOMAINS = (
+        "google.com", "google.es", "duckduckgo.com", "bing.com",
+        "yahoo.com", "yandex.com", "baidu.com", "ecosia.org",
+        "startpage.com", "search.brave.com",
+    )
+
+    @staticmethod
+    def _is_search_engine(url: str) -> bool:
+        """Detecta si la URL es de un motor de búsqueda."""
+        try:
+            host = urlparse(url).netloc.lower()
+            return any(se in host for se in ContentExtractor._SEARCH_ENGINE_DOMAINS)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _resolve_search_links(soup: BeautifulSoup, page_url: str) -> List[str]:
+        """Extrae URLs reales de páginas de resultados de búsqueda.
+
+        En vez de capturar los links de redirección del buscador, extrae
+        las URLs destino reales que el usuario quiere visitar.
+        """
+        real_links = []
+        base_domain = ""
+        try:
+            base_domain = urlparse(page_url).netloc.lower()
+        except Exception:
+            pass
+
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            link_text = a.get_text(strip=True)
+
+            if not link_text or len(link_text) < 4:
+                continue
+
+            # Ignorar links internos del propio buscador
+            if href.startswith('/') or href.startswith('#'):
+                continue
+
+            try:
+                link_domain = urlparse(href).netloc.lower()
+            except Exception:
+                continue
+
+            # Saltar links que son del propio buscador
+            if any(se in link_domain for se in ContentExtractor._SEARCH_ENGINE_DOMAINS):
+                continue
+
+            # Saltar links internos de navegación del buscador
+            if base_domain and link_domain == base_domain:
+                continue
+
+            if href.startswith('http') and link_text:
+                real_links.append(f"{link_text}: {href}")
+
+        return real_links[:20]
 
     @staticmethod
     def extract_from_html(html: str, url: str, title: str) -> str:
@@ -78,6 +145,8 @@ class ContentExtractor:
             soup = BeautifulSoup(html, 'lxml')
         except Exception:
             soup = BeautifulSoup(html, 'html.parser')
+
+        is_search = ContentExtractor._is_search_engine(url)
 
         for tag in soup(['script', 'style', 'nav', 'footer', 'aside',
                          'iframe', 'noscript', 'svg', 'form', 'input',
@@ -91,11 +160,16 @@ class ContentExtractor:
                 level = h.name
                 headings.append(f"[{level.upper()}] {text}")
 
-        links = []
-        for a in soup.find_all('a', href=True):
-            link_text = a.get_text(strip=True)
-            if link_text and len(link_text) > 3:
-                links.append(f"{link_text}: {a['href']}")
+        if is_search:
+            links = ContentExtractor._resolve_search_links(soup, url)
+        else:
+            links = []
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                link_text = a.get_text(strip=True)
+                if link_text and len(link_text) > 3 and href.startswith('http'):
+                    links.append(f"{link_text}: {href}")
+            links = links[:15]
 
         images = []
         for img in soup.find_all('img', alt=True):
@@ -111,19 +185,18 @@ class ContentExtractor:
 
         sections = [f"TITLE: {title}", f"URL: {url}"]
         if headings:
-            sections.append("STRUCTURE:\n" + '\n'.join(headings[:15]))
+            sections.append("HEADINGS:\n" + '\n'.join(headings[:15]))
         sections.append(f"CONTENT:\n{clean_text[:ContentExtractor.MAX_CONTENT_PER_TAB]}")
         if images:
             sections.append("IMAGES: " + ', '.join(images[:10]))
         if links:
-            sections.append("KEY LINKS:\n" + '\n'.join(links[:10]))
+            sections.append("LINKS (real destination URLs):\n" + '\n'.join(links))
 
         return '\n\n'.join(sections)
 
     @staticmethod
     def get_domain(url: str) -> str:
         try:
-            from urllib.parse import urlparse
             parsed = urlparse(url)
             return parsed.netloc or url
         except Exception:
@@ -137,67 +210,94 @@ class GenTabWorker(QThread):
     error = Signal(str)
 
     def __init__(self, server_url: str, prompt: str, tab_contexts: List[TabContext],
-                 temperature: float = 0.7, max_tokens: int = 4000):
+                 temperature: float = 0.7, max_tokens: int = 4000,
+                 llm_config: Optional[LLMConfig] = None):
         super().__init__()
         self.server_url = server_url
         self.prompt = prompt
         self.tab_contexts = tab_contexts
         self.temperature = temperature
         self.max_tokens = max_tokens
+        if llm_config is not None:
+            self.llm_config = llm_config
+        else:
+            cfg = LLMConfig()
+            cfg.local_url = server_url
+            cfg.temperature = temperature
+            cfg.max_tokens = max_tokens
+            self.llm_config = cfg
+        self._model_ctx_window = 4096
+
+    _CTX_OVERHEAD_TOKENS = 500
+    _MIN_CONTEXT_CHARS = 800
+    _MAX_INITIAL_CONTEXT_CHARS = 10000
+    _CONTEXT_SHRINK_FACTOR = 0.75
+    _OUTPUT_RESERVE_TOKENS = 200
+    _MIN_OUTPUT_TOKENS = 3500
 
     def run(self):
         try:
-            self.progress.emit("Construyendo contexto multi-tab...")
-            context_text = self._build_context()
-            self.progress.emit(f"Contexto preparado: {len(context_text)} caracteres de {len(self.tab_contexts)} pestañas")
-
-            self.progress.emit("Enviando a IA para generar aplicación...")
-            start_time = time.time()
-
+            client = LLMClient(self.llm_config)
             system_prompt = self._build_system_prompt()
+
+            self._model_ctx_window = client.detect_context_window()
+
+            # Reservar al menos _MIN_OUTPUT_TOKENS para la respuesta HTML
+            desired_output = max(self.max_tokens, self._MIN_OUTPUT_TOKENS)
+            max_input_tokens = self._model_ctx_window - desired_output - self._CTX_OVERHEAD_TOKENS
+
+            self.progress.emit("Construyendo contexto multi-tab...")
+            context_budget = min(ContentExtractor.MAX_TOTAL_CONTEXT, self._MAX_INITIAL_CONTEXT_CHARS)
+            context_text = self._build_context(max_total_chars=context_budget)
             user_prompt = self._build_user_prompt(context_text)
+            prompt_tokens = self._estimate_tokens(system_prompt) + self._estimate_tokens(user_prompt)
 
-            payload = {
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
-                "stream": False
-            }
+            while prompt_tokens > max_input_tokens and context_budget > self._MIN_CONTEXT_CHARS:
+                context_budget = max(self._MIN_CONTEXT_CHARS, int(context_budget * self._CONTEXT_SHRINK_FACTOR))
+                context_text = self._build_context(max_total_chars=context_budget)
+                user_prompt = self._build_user_prompt(context_text)
+                prompt_tokens = self._estimate_tokens(system_prompt) + self._estimate_tokens(user_prompt)
 
-            response = requests.post(
-                f"{self.server_url}/v1/chat/completions",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=120
+            self.progress.emit(
+                f"Contexto: {len(context_text)} chars de {len(self.tab_contexts)} pestañas "
+                f"(ventana: {self._model_ctx_window} tokens)"
             )
 
+            safe_max_tokens = max(
+                self._MIN_OUTPUT_TOKENS,
+                min(desired_output, self._model_ctx_window - prompt_tokens - self._OUTPUT_RESERVE_TOKENS),
+            )
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            self.progress.emit(f"Generando aplicación (max {safe_max_tokens} tokens de salida)...")
+            start_time = time.time()
+
+            raw_content = client.chat(messages, max_tokens=safe_max_tokens, temperature=self.temperature)
             generation_time = time.time() - start_time
 
-            if response.status_code != 200:
-                self.error.emit(f"Error del servidor: {response.status_code}")
-                return
-
-            data = response.json()
-            if "choices" not in data or not data["choices"]:
-                self.error.emit("Respuesta vacía del servidor")
-                return
-
-            raw_content = data["choices"][0]["message"]["content"]
             html = self._extract_html(raw_content)
 
             if not html:
-                self.error.emit("La IA no generó HTML válido")
-                return
+                html = self._build_fallback_html(raw_content or "No se pudo generar contenido.")
+                self.progress.emit("Respuesta sin HTML válido. Usando fallback de texto.")
+
+            if self._is_html_visually_empty(html):
+                self.progress.emit("HTML vacío. Construyendo resumen interactivo local.")
+                html = self._build_local_summary_html()
 
             html = self._inject_source_links(html)
+            model_name = self.llm_config.llmapi_model if self.llm_config.provider == PROVIDER_LLMAPI else "local"
+            logger.info(
+                "GenTab ready | html_len=%s | model=%s | prompt_tokens~%s | max_tokens=%s",
+                len(html or ""), model_name, prompt_tokens, safe_max_tokens,
+            )
             self.progress.emit("GenTab generada exitosamente")
 
-            gen_id = hashlib.md5(
-                f"{self.prompt}{time.time()}".encode()
-            ).hexdigest()[:12]
+            gen_id = hashlib.md5(f"{self.prompt}{time.time()}".encode()).hexdigest()[:12]
 
             result = GenTabResult(
                 id=gen_id,
@@ -208,12 +308,14 @@ class GenTabWorker(QThread):
                              for tc in self.tab_contexts],
                 created_at=datetime.now().isoformat(),
                 generation_time=round(generation_time, 2),
-                model_used=data.get("model", "unknown"),
-                token_count=data.get("usage", {}).get("total_tokens", 0)
+                model_used=model_name,
+                token_count=0,
             )
 
             self.finished.emit(result)
 
+        except LLMError as e:
+            self.error.emit(str(e))
         except requests.exceptions.ConnectionError:
             self.error.emit("No se pudo conectar al servidor LLM. Verifica que LM Studio esté ejecutándose.")
         except requests.exceptions.Timeout:
@@ -221,59 +323,94 @@ class GenTabWorker(QThread):
         except Exception as e:
             self.error.emit(f"Error inesperado: {str(e)}")
 
-    def _build_context(self) -> str:
+    def _build_context(self, max_total_chars: Optional[int] = None) -> str:
         sections = []
         total = 0
+        limit = max_total_chars if max_total_chars is not None else ContentExtractor.MAX_TOTAL_CONTEXT
+        per_tab = limit // max(len(self.tab_contexts), 1)
         for tc in self.tab_contexts:
-            if total >= ContentExtractor.MAX_TOTAL_CONTEXT:
+            if total >= limit:
                 break
-            chunk = tc.content[:ContentExtractor.MAX_CONTENT_PER_TAB]
-            sections.append(f"=== TAB {tc.index + 1}: {tc.title} ===\n"
-                            f"URL: {tc.url}\n"
-                            f"Domain: {tc.domain}\n\n"
-                            f"{chunk}")
+            remaining = limit - total
+            chunk_limit = min(per_tab, ContentExtractor.MAX_CONTENT_PER_TAB, remaining)
+            chunk = tc.content[:chunk_limit]
+            sections.append(
+                f"--- TAB {tc.index + 1} ---\n"
+                f"Title: {tc.title}\n"
+                f"URL: {tc.url}\n"
+                f"Domain: {tc.domain}\n"
+                f"{chunk}"
+            )
             total += len(chunk)
         return '\n\n'.join(sections)
 
     def _build_system_prompt(self) -> str:
-        return """You are GenTab, an AI that generates interactive web applications from browser tab data.
+        return """You are GenTab. Transform browser tab data into a complete, working single-page HTML app.
 
-RULES:
-1. Generate a COMPLETE, SINGLE HTML file with embedded CSS and JavaScript.
-2. The app MUST be visually modern: use CSS Grid/Flexbox, gradients, shadows, rounded corners, smooth transitions.
-3. Use a professional color palette. Default to dark theme with accent colors.
-4. The app MUST be interactive: sorting, filtering, tabs, expandable sections, etc.
-5. Include a header with the app title and a "Sources" section linking back to original URLs.
-6. Every data point must reference its source tab.
-7. Make it responsive and mobile-friendly.
-8. Use modern CSS (variables, clamp(), container queries if needed).
-9. Use vanilla JavaScript only (no external libraries).
-10. Output ONLY the HTML. No explanations, no markdown fences.
+RULES (non-negotiable):
+- Output ONLY a complete HTML document starting with <!DOCTYPE html> and ending with </html>.
+- No markdown, no explanations, no code fences around the HTML.
+- ALL CSS inside <style>, ALL JS inside <script>. No external CDN links.
+- Use ONLY real URLs from the data for links — never invent URLs.
+
+BUILD STRATEGY (follow this order):
+1. Read the raw tab data and extract structured items: titles, descriptions, prices, dates, URLs, key facts.
+2. Put ALL extracted data in a JS const array at the top of your <script> (one object per item/article/result).
+3. Write a render() function that loops over the array and creates HTML cards/rows for each item.
+4. Call render() on load. Add a search <input> that filters items and re-renders.
 
 VISUAL STYLE:
-- Background: #0f0f23 with subtle gradient
-- Cards: #1a1a3e with border-radius: 16px and box-shadow
-- Accent: #6366f1 (indigo) with #818cf8 hover
-- Text: #e2e8f0 main, #94a3b8 secondary
-- Font: system-ui, -apple-system, sans-serif
-- Smooth animations on hover and state changes
-- Glass-morphism effects where appropriate"""
+- Dark theme: body bg #0f0f23, card bg #1a1a3e, accent #6366f1, text #e2e8f0
+- Cards: border-radius:12px; padding:16px; margin:8px; transition:transform .15s
+- Card hover: transform:translateY(-3px); border-color:#6366f1
+- Layout: CSS grid, 2-3 columns on wide screens, 1 column on mobile
+- Font: system-ui
+
+IMPORTANT: Prioritize DATA RICHNESS over visual complexity. Fill every card with real content from the tabs. An app with 10 filled cards is far better than a pretty empty shell."""
 
     def _build_user_prompt(self, context: str) -> str:
+        request = (self.prompt or "").strip()
+        if len(request) > 800:
+            request = request[:800] + "..."
+
         source_list = '\n'.join(
-            f"- Tab {tc.index + 1}: {tc.title} ({tc.url})"
-            for tc in self.tab_contexts
+            f"Tab{tc.index + 1}: {tc.title} — {tc.url}"
+            for tc in self.tab_contexts[:10]
         )
-        return f"""USER REQUEST: {self.prompt}
+        return f"""TASK: {request}
 
-OPEN TABS DATA:
-{context}
-
-SOURCE TABS (link back to these):
+SOURCE URLs (use only these, do not invent):
 {source_list}
 
-Generate a complete interactive HTML application that fulfills the user's request using the data from the open tabs.
-Include a "Sources" footer that links to each original tab URL."""
+TAB CONTENT TO PROCESS:
+{context}
+
+OUTPUT: A single HTML document. Follow this structure EXACTLY:
+<!DOCTYPE html><html lang="es"><head>...</head>
+<body>
+  <!-- header with title and search input -->
+  <!-- card grid -->
+<script>
+const DATA = [
+  // ← Fill this array with ALL items/articles/results extracted from the tab content above.
+  // Each object: {{ title, description, url, tag, date, price }} (use only fields that exist in the data)
+  // Extract AT LEAST 5 items. If the tab has a list, extract every list item.
+];
+function render(items) {{
+  // Loop over items, create card elements, append to grid
+}}
+render(DATA);
+document.getElementById('search').oninput = e => render(DATA.filter(d => JSON.stringify(d).toLowerCase().includes(e.target.value.toLowerCase())));
+</script>
+</body></html>
+
+Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimación rápida para ajustar presupuesto (aprox 1 token cada 4 chars)."""
+        return max(1, int(len(text or "") / 4))
+
+    # _detect_context_window movido a LLMClient.detect_context_window()
 
     def _extract_html(self, raw: str) -> str:
         raw = raw.strip()
@@ -306,7 +443,229 @@ Include a "Sources" footer that links to each original tab URL."""
 <title>GenTab</title></head>
 <body>{raw}</body></html>"""
 
-        return raw
+        # Si sigue sin contener estructura HTML útil, devolver vacío para fallback
+        has_html = ("<html" in raw.lower()) or ("<body" in raw.lower()) or ("<div" in raw.lower())
+        return raw if has_html else ""
+
+    def _build_fallback_html(self, text: str) -> str:
+        """Construye HTML con formato cuando la IA devuelve texto plano."""
+        safe_text = _html_escape.escape(text or "")
+        # Convertir listas con guiones/asteriscos en <li>
+        lines = safe_text.split("\n")
+        formatted_lines = []
+        in_list = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(("- ", "* ", "• ")):
+                if not in_list:
+                    formatted_lines.append("<ul>")
+                    in_list = True
+                formatted_lines.append(f"<li>{stripped[2:]}</li>")
+            else:
+                if in_list:
+                    formatted_lines.append("</ul>")
+                    in_list = False
+                if stripped:
+                    formatted_lines.append(f"<p>{stripped}</p>")
+        if in_list:
+            formatted_lines.append("</ul>")
+        body_content = "\n".join(formatted_lines)
+
+        title = _html_escape.escape(self._generate_title(self.prompt or "GenTab"))
+        return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{title}</title>
+  <style>
+    body {{
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0; padding: 24px;
+      background: radial-gradient(ellipse at 20% 0%, #1e1b4b, #0f0f23 60%);
+      color: #e2e8f0;
+    }}
+    .container {{ max-width: 800px; margin: 0 auto; }}
+    h1 {{ font-size: 24px; margin-bottom: 8px; }}
+    .meta {{ color: #94a3b8; font-size: 13px; margin-bottom: 20px; }}
+    .content {{
+      background: #1a1a3e; border: 1px solid rgba(99,102,241,0.3);
+      border-radius: 16px; padding: 24px; line-height: 1.7;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }}
+    .content p {{ margin: 0 0 12px; }}
+    .content ul {{ padding-left: 20px; margin: 0 0 12px; }}
+    .content li {{ margin-bottom: 6px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{title}</h1>
+    <div class="meta">Generado por GenTab a partir de {len(self.tab_contexts)} pestañas</div>
+    <div class="content">{body_content}</div>
+  </div>
+</body>
+</html>"""
+
+    def _is_html_visually_empty(self, html: str) -> bool:
+        """Detecta HTML técnicamente válido pero sin contenido útil visible."""
+        try:
+            if not html or len(html.strip()) < 80:
+                return True
+            soup = BeautifulSoup(html, "html.parser")
+            body = soup.find("body")
+            if body is None:
+                return True
+            text = body.get_text(" ", strip=True)
+            has_meaningful_text = len(text) >= 30
+            has_structural_content = bool(body.find(["table", "ul", "ol", "article", "section", "main", "p", "h1", "h2", "h3"]))
+            return not (has_meaningful_text or has_structural_content)
+        except Exception:
+            return False
+
+    def _build_local_summary_html(self) -> str:
+        """Fallback local interactivo con búsqueda, filtros y vista grid/lista."""
+        import json as _json
+        title = _html_escape.escape(self._generate_title(self.prompt or "GenTab"))
+
+        items_data = []
+        for tc in self.tab_contexts[:12]:
+            raw = (tc.content or "")
+            clean_lines = []
+            skip_prefixes = (
+                "TITLE:", "URL:", "HEADINGS:", "CONTENT:", "IMAGES:",
+                "LINKS (real", "KEY LINKS:", "=== TAB",
+            )
+            for line in raw.split("\n"):
+                stripped = line.strip()
+                if any(stripped.startswith(p) for p in skip_prefixes):
+                    continue
+                if stripped.startswith("[H") and "]" in stripped[:6]:
+                    continue
+                if stripped:
+                    clean_lines.append(stripped)
+            clean_text = " ".join(clean_lines)[:400]
+            items_data.append({
+                "title": tc.title or tc.domain or "Pestaña",
+                "domain": tc.domain or "",
+                "url": tc.url or "",
+                "excerpt": clean_text or "Sin contenido disponible.",
+            })
+
+        items_json = _json.dumps(items_data, ensure_ascii=False)
+
+        return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{title}</title>
+  <style>
+    :root {{ --bg:#0f0f23; --card:#1a1a3e; --text:#e2e8f0; --muted:#94a3b8;
+             --accent:#6366f1; --accent2:#818cf8; --border:rgba(99,102,241,0.3); }}
+    * {{ box-sizing:border-box; margin:0; }}
+    body {{ background:radial-gradient(ellipse at 20% 0%,#1e1b4b,#0f0f23 60%);
+            color:var(--text); font-family:system-ui,-apple-system,sans-serif; padding:24px; }}
+    header {{ display:flex; flex-wrap:wrap; align-items:center; gap:12px;
+              margin-bottom:20px; }}
+    h1 {{ font-size:24px; flex:1; }}
+    .toolbar {{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }}
+    .toolbar input {{ background:#1a1a3e; border:1px solid var(--border);
+                      border-radius:10px; padding:8px 14px; color:var(--text);
+                      font-size:14px; width:220px; outline:none; }}
+    .toolbar input:focus {{ border-color:var(--accent); }}
+    .toolbar button {{ background:var(--card); border:1px solid var(--border);
+                       border-radius:8px; padding:6px 14px; color:var(--text);
+                       cursor:pointer; font-size:13px; transition:all .2s; }}
+    .toolbar button:hover,.toolbar button.active {{ background:var(--accent);
+                                                    border-color:var(--accent); }}
+    .stats {{ color:var(--muted); font-size:13px; margin-bottom:16px; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+             gap:16px; }}
+    .list .card {{ display:flex; gap:16px; align-items:flex-start; }}
+    .list .card .card-body {{ flex:1; }}
+    .card {{ background:var(--card); border:1px solid var(--border);
+             border-radius:14px; padding:18px; transition:transform .2s,box-shadow .2s;
+             box-shadow:0 4px 16px rgba(0,0,0,0.2); }}
+    .card:hover {{ transform:translateY(-3px); box-shadow:0 12px 32px rgba(0,0,0,0.35); }}
+    .card h3 {{ font-size:16px; margin-bottom:6px; line-height:1.3; }}
+    .card .domain {{ color:var(--accent2); font-size:12px; margin-bottom:8px; }}
+    .card p {{ color:#cbd5e1; font-size:13px; line-height:1.6;
+               display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical;
+               overflow:hidden; }}
+    .card .actions {{ margin-top:12px; display:flex; gap:8px; }}
+    .card .actions a {{ color:var(--accent2); text-decoration:none; font-size:13px;
+                        padding:4px 10px; border:1px solid var(--border);
+                        border-radius:6px; transition:all .2s; }}
+    .card .actions a:hover {{ background:var(--accent); color:#fff; border-color:var(--accent); }}
+    .hidden {{ display:none!important; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{title}</h1>
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="Buscar...">
+      <button onclick="toggleView('grid')" id="btnGrid" class="active">▦ Grid</button>
+      <button onclick="toggleView('list')" id="btnList">☰ Lista</button>
+      <button onclick="sortCards('title')">A-Z</button>
+      <button onclick="sortCards('domain')">Dominio</button>
+    </div>
+  </header>
+  <div class="stats" id="stats"></div>
+  <div class="grid" id="container"></div>
+  <script>
+    const DATA = {items_json};
+    let currentView = 'grid';
+    let currentData = [...DATA];
+
+    function render() {{
+      const c = document.getElementById('container');
+      c.className = currentView;
+      c.innerHTML = currentData.map((d,i) => `
+        <div class="card" data-idx="${{i}}">
+          <div class="card-body">
+            <h3>${{esc(d.title)}}</h3>
+            <div class="domain">${{esc(d.domain)}}</div>
+            <p>${{esc(d.excerpt)}}</p>
+            <div class="actions">
+              <a href="${{esc(d.url)}}" target="_blank" rel="noopener">Visitar sitio ↗</a>
+            </div>
+          </div>
+        </div>
+      `).join('');
+      document.getElementById('stats').textContent =
+        currentData.length + ' de ' + DATA.length + ' resultados';
+    }}
+
+    function esc(s) {{ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }}
+
+    function toggleView(v) {{
+      currentView = v;
+      document.getElementById('btnGrid').className = v==='grid'?'active':'';
+      document.getElementById('btnList').className = v==='list'?'active':'';
+      render();
+    }}
+
+    function sortCards(key) {{
+      currentData.sort((a,b) => (a[key]||'').localeCompare(b[key]||''));
+      render();
+    }}
+
+    document.getElementById('search').addEventListener('input', function(e) {{
+      const q = e.target.value.toLowerCase();
+      currentData = DATA.filter(d =>
+        d.title.toLowerCase().includes(q) ||
+        d.domain.toLowerCase().includes(q) ||
+        d.excerpt.toLowerCase().includes(q)
+      );
+      render();
+    }});
+
+    render();
+  </script>
+</body>
+</html>"""
 
     def _inject_source_links(self, html: str) -> str:
         badge_css = """
@@ -337,7 +696,9 @@ body { padding-bottom: 36px !important; }
 </style>
 """
         source_links = ' '.join(
-            f'<a href="{tc.url}" target="_blank" title="{tc.title}">{tc.domain}</a>'
+            f'<a href="{_html_escape.escape(tc.url)}" target="_blank" '
+            f'title="{_html_escape.escape(tc.title)}">'
+            f'{_html_escape.escape(tc.domain)}</a>'
             for tc in self.tab_contexts
         )
         badge_html = f"""
@@ -358,9 +719,10 @@ body { padding-bottom: 36px !important; }
         if '<title>' in raw and '</title>' in raw:
             start = raw.index('<title>') + 7
             end = raw.index('</title>')
-            title = raw[start:end].strip()
-            if title:
-                return title
+            if end > start:
+                title = raw[start:end].strip()
+                if title:
+                    return title
 
         words = self.prompt.split()
         return ' '.join(words[:6]).capitalize() + ('...' if len(words) > 6 else '')
@@ -438,7 +800,8 @@ class GenTabEngine(QObject):
     def generate_gentab(self, server_url: str, prompt: str,
                         tab_contexts: List[TabContext],
                         temperature: float = 0.7,
-                        max_tokens: int = 4000):
+                        max_tokens: int = 1200,
+                        llm_config: Optional[LLMConfig] = None):
         """Inicia la generación de una GenTab en un hilo de trabajo."""
         if self._worker and self._worker.isRunning():
             self.gentab_error.emit("Ya hay una generación en curso.")
@@ -449,7 +812,10 @@ class GenTabEngine(QObject):
             self.gentab_error.emit("No hay contenido extraído de las pestañas.")
             return
 
-        self._worker = GenTabWorker(server_url, prompt, valid, temperature, max_tokens)
+        self._worker = GenTabWorker(
+            server_url, prompt, valid, temperature, max_tokens,
+            llm_config=llm_config
+        )
         self._worker.progress.connect(self.gentab_progress.emit)
         self._worker.finished.connect(self._on_generation_complete)
         self._worker.error.connect(self.gentab_error.emit)

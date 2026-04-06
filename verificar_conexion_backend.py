@@ -115,7 +115,7 @@ def main():
     else:
         # URLs hardcodeadas (nueva IP)
         backend_url = "http://192.168.1.175:8000"
-        frontend_url = "http://192.168.1.175:4321"
+        frontend_url = "http://192.168.1.174:4321"
         registration_url = f"{frontend_url}/auth/registro.html"
         login_url = f"{frontend_url}/auth/login.html"
         dashboard_url = f"{frontend_url}/app/dashboard.html"
@@ -198,7 +198,7 @@ def main():
         print()
         print("💡 Sugerencias:")
         print("   1. Verifica que el servidor backend esté ejecutándose en 192.168.1.175:8000")
-        print("   2. Verifica que el servidor web esté ejecutándose en 192.168.1.175:4321")
+        print("   2. Verifica que el servidor web esté ejecutándose en 192.168.1.174:4321")
         print("   3. Verifica la conectividad de red:")
         print(f"      ping 192.168.1.175")
         print("   4. Verifica que los puertos 8000 y 4321 estén abiertos")
