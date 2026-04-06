@@ -39,6 +39,25 @@ except ImportError:
         BASE_THEMES = ["light", "dark"]
 
 
+def _blend_hex_color(hex_a: str, hex_b: str, t: float) -> str:
+    """Mezcla dos colores #RRGGBB. t=0 -> hex_a, t=1 -> hex_b."""
+    try:
+        def parse(h: str):
+            h = h.strip().lstrip("#")
+            if len(h) == 6:
+                return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
+            return (0, 0, 0)
+
+        a, b = parse(hex_a), parse(hex_b)
+        t = max(0.0, min(1.0, float(t)))
+        r = int(a[0] * (1 - t) + b[0] * t)
+        g = int(a[1] * (1 - t) + b[1] * t)
+        bl = int(a[2] * (1 - t) + b[2] * t)
+        return f"#{r:02x}{g:02x}{bl:02x}"
+    except Exception:
+        return hex_a
+
+
 class ThemeEngine(QObject):
 
     """
@@ -293,7 +312,32 @@ class ThemeEngine(QObject):
 
         borders = theme_data.get("borders", {})
 
-        
+        effects = theme_data.get("effects", {})
+        glow_intensity = max(0, min(100, int(effects.get("glow_intensity", 0) or 0)))
+        hover_brightness = max(0, min(100, int(effects.get("hover_brightness", 0) or 0)))
+        glow_color = colors.get("glow_accent", colors.get("accent", "#0078d4"))
+        icon_color = colors.get("icon_color", colors.get("primary", "#000000"))
+        icon_btn_bg = colors.get("icon_button_background", "transparent")
+        icon_btn_hover = colors.get("icon_button_hover", None)
+        gw = 0 if glow_intensity == 0 else max(1, min(4, 1 + glow_intensity // 34))
+        tb_border = "none" if gw == 0 else f"{gw}px solid transparent"
+        tb_border_hover = "none" if gw == 0 else f"{gw}px solid {glow_color}"
+        btn_hover_base = colors.get("button_hover", colors.get("hover", "#e8e8e8"))
+        if hover_brightness > 0:
+            mix = min(0.55, hover_brightness / 100.0 * 0.55)
+            btn_hover_mixed = _blend_hex_color(btn_hover_base, "#ffffff", mix)
+        else:
+            btn_hover_mixed = btn_hover_base
+        tab_hover_base = colors.get("tab_hover", colors.get("hover", "#e8e8e8"))
+        if hover_brightness > 0:
+            mix_t = min(0.45, hover_brightness / 100.0 * 0.45)
+            tab_hover_mixed = _blend_hex_color(tab_hover_base, "#ffffff", mix_t)
+        else:
+            tab_hover_mixed = tab_hover_base
+        if icon_btn_hover is None:
+            icon_btn_hover = btn_hover_mixed
+        push_border = "none" if gw == 0 else f"{gw}px solid transparent"
+        push_border_hover = "none" if gw == 0 else f"{gw}px solid {glow_color}"
 
         return f"""
 
@@ -359,7 +403,7 @@ class ThemeEngine(QObject):
 
             color: {colors.get('primary', '#000000')} !important;
 
-            border: none !important;
+            border: {tb_border} !important;
 
             border-radius: 16px !important;
 
@@ -383,7 +427,9 @@ class ThemeEngine(QObject):
 
         QToolBar QToolButton:hover {{
 
-            background-color: {colors.get('button_hover', colors.get('hover', '#e8e8e8'))} !important;
+            background-color: {btn_hover_mixed} !important;
+
+            border: {tb_border_hover} !important;
 
         }}
 
@@ -392,6 +438,25 @@ class ThemeEngine(QObject):
         QToolBar QToolButton:pressed {{
 
             background-color: {colors.get('button_pressed', colors.get('selected', '#cce8ff'))} !important;
+
+        }}
+
+        /* Panel lateral izquierdo: iconos (tint en código), fondo y hover del botón */
+        #sideStrip QToolButton {{
+
+            color: {icon_color} !important;
+
+            background-color: {icon_btn_bg} !important;
+
+            border: {tb_border} !important;
+
+        }}
+
+        #sideStrip QToolButton:hover {{
+
+            background-color: {icon_btn_hover} !important;
+
+            border: {tb_border_hover} !important;
 
         }}
 
@@ -405,7 +470,7 @@ class ThemeEngine(QObject):
 
             color: {colors.get('primary', '#000000')} !important;
 
-            border: none !important;
+            border: {push_border} !important;
 
             border-radius: {borders.get('radius', '4px')} !important;
 
@@ -423,7 +488,9 @@ class ThemeEngine(QObject):
 
         QPushButton:hover {{
 
-            background-color: {colors.get('button_hover', colors.get('hover', '#e8e8e8'))} !important;
+            background-color: {btn_hover_mixed} !important;
+
+            border: {push_border_hover} !important;
 
         }}
 
@@ -507,15 +574,13 @@ class ThemeEngine(QObject):
 
             border-color: {colors.get('input_focus', colors.get('accent', '#0078d4'))} !important;
 
-            box-shadow: 0 0 0 2px {colors.get('input_focus', colors.get('accent', '#0078d4'))}33 !important;
-
         }}
 
         
 
         QLineEdit:hover {{
 
-            border-color: {colors.get('accent', '#0078d4')} !important;
+            border-color: {glow_color if gw > 0 else colors.get('accent', '#0078d4')} !important;
 
         }}
 
@@ -587,7 +652,7 @@ class ThemeEngine(QObject):
 
         QTabBar::tab:hover {{
 
-            background-color: {colors.get('tab_hover', colors.get('hover', '#e8e8e8'))} !important;
+            background-color: {tab_hover_mixed} !important;
 
         }}
 
@@ -935,7 +1000,7 @@ class ThemeEngine(QObject):
 
         QListWidget::item:hover {{
 
-            background-color: {colors.get('hover', '#e8e8e8')} !important;
+            background-color: {btn_hover_mixed} !important;
 
         }}
 

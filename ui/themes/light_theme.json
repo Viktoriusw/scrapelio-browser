@@ -33,7 +33,11 @@
     "logout_button": "#e74c3c",
     "logout_button_hover": "#c0392b",
     "logout_button_pressed": "#a93226",
-    "status_success": "#27ae60"
+    "status_success": "#27ae60",
+    "icon_color": "#333333",
+    "icon_button_background": "transparent",
+    "icon_button_hover": "#e0e0e0",
+    "glow_accent": "#0078d4"
   },
   "fonts": {
     "family": "Segoe UI, Arial, sans-serif",
@@ -56,6 +60,8 @@
   "effects": {
     "glow": false,
     "neon": false,
-    "scan_lines": false
+    "scan_lines": false,
+    "glow_intensity": 0,
+    "hover_brightness": 0
   }
 }

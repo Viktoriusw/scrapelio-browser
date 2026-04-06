@@ -17,7 +17,10 @@
     "selected": "#0078d433",
     "text_primary": "#000000",
     "text_secondary": "#000000",
-    "text_disabled": "#000000"
+    "text_disabled": "#000000",
+    "icon_color": "#9AA0A6",
+    "icon_button_background": "transparent",
+    "icon_button_hover": "#404040"
   },
   "fonts": {
     "family": "Segoe UI, Arial, sans-serif",
