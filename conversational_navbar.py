@@ -76,7 +76,6 @@ class ConversationManager:
         self._file = os.path.join(self._dir, "session_history.json")
         self._messages: List[Dict[str, Any]] = []
         self.load_conversation()
-
     def save_conversation(self, messages: Optional[List[Dict]] = None) -> None:
         """Persiste el historial.
 
@@ -90,7 +89,6 @@ class ConversationManager:
                 json.dump(self._messages, f, ensure_ascii=False, indent=2)
         except Exception as exc:
             logger.warning("Error al guardar conversación: %s", exc)
-
     def load_conversation(self) -> List[Dict]:
         """Carga el historial desde disco.
 
@@ -104,7 +102,6 @@ class ConversationManager:
             except Exception:
                 self._messages = []
         return self._messages
-
     def add_message(self, role: str, content: str) -> None:
         """Agrega un mensaje al historial.
 
@@ -117,7 +114,6 @@ class ConversationManager:
         if len(self._messages) > self.MAX_MESSAGES:
             self._messages = self._messages[-self.MAX_MESSAGES:]
         self.save_conversation()
-
     def get_context_window(self) -> List[Dict]:
         """Devuelve los últimos N mensajes del historial.
 
@@ -125,7 +121,6 @@ class ConversationManager:
             Lista de hasta ``CONTEXT_WINDOW`` mensajes.
         """
         return self._messages[-self.CONTEXT_WINDOW:]
-
     def clear_history(self) -> None:
         """Elimina todo el historial."""
         self._messages.clear()
@@ -150,7 +145,6 @@ class SuggestionDropdown(QFrame):
         # Usar paleta de la aplicación para adaptarse al tema (claro/oscuro)
         self.setAutoFillBackground(True)
         self._apply_theme()
-
     def _apply_theme(self) -> None:
         """Aplica estilos que respetan el tema de la aplicación."""
         pal = QApplication.palette()
@@ -195,7 +189,6 @@ class SuggestionDropdown(QFrame):
         self._list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._list)
         self.hide()
-
     def set_suggestions(self, items: List[Dict[str, str]]) -> None:
         """Establece las sugerencias visibles.
 
@@ -209,7 +202,6 @@ class SuggestionDropdown(QFrame):
             list_item = QListWidgetItem(f"{icon}  {text}")
             list_item.setData(Qt.UserRole, text)
             self._list.addItem(list_item)
-
         height = min(len(items), self.MAX_VISIBLE) * 38 + 10
         self.setFixedHeight(max(height, 48))
 
@@ -217,7 +209,6 @@ class SuggestionDropdown(QFrame):
             self.show()
         else:
             self.hide()
-
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         text = item.data(Qt.UserRole)
         if text:
@@ -267,7 +258,6 @@ class ConversationalNavBar(QLineEdit):
         self.setMaximumWidth(600)
         if hasattr(self, "setClearButtonEnabled"):
             self.setClearButtonEnabled(True)
-
         self._conversation = ConversationManager()
         self._dropdown = SuggestionDropdown()
         self._dropdown.suggestion_selected.connect(self._on_suggestion_selected)
@@ -293,7 +283,6 @@ class ConversationalNavBar(QLineEdit):
                 border: 1px solid #0f3460;
             }
         """)
-
     # ── Eventos ──────────────────────────────────────────────────────────────
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -308,11 +297,9 @@ class ConversationalNavBar(QLineEdit):
         if event.key() == Qt.Key_Escape:
             self._dropdown.hide()
         super().keyPressEvent(event)
-
     def focusOutEvent(self, event):
         QTimer.singleShot(200, self._dropdown.hide)
         super().focusOutEvent(event)
-
     # ── Clasificación ────────────────────────────────────────────────────────
 
     @classmethod
@@ -321,7 +308,6 @@ class ConversationalNavBar(QLineEdit):
 
         Args:
             text: Texto del usuario.
-
         Returns:
             ``InputType.URL``, ``InputType.SEARCH`` o ``InputType.NATURAL_LANG``.
         """
@@ -329,22 +315,16 @@ class ConversationalNavBar(QLineEdit):
 
         if stripped.startswith(("http://", "https://", "file://", "ftp://")):
             return InputType.URL
-
         if re.match(r'^[\w.-]+\.\w{2,}(/\S*)?$', stripped):
             return InputType.URL
-
         for prefix in cls._NL_PREFIXES:
             if stripped.startswith(prefix):
                 return InputType.NATURAL_LANG
-
         if "?" in stripped and len(stripped.split()) > 3:
             return InputType.NATURAL_LANG
-
         if len(stripped.split()) >= 6:
             return InputType.NATURAL_LANG
-
         return InputType.SEARCH
-
     def _dispatch(self, text: str) -> None:
         """Despacha el texto según su clasificación."""
         for prefix in self._GENTAB_PREFIXES:
@@ -353,20 +333,16 @@ class ConversationalNavBar(QLineEdit):
                 self._conversation.add_message("user", text)
                 self.gentab_requested.emit(prompt)
                 return
-
         input_type = self._classify_input(text)
 
         if input_type == InputType.URL:
             url = text if text.startswith(("http", "file", "ftp")) else f"https://{text}"
             self.navigation_requested.emit(url)
-
         elif input_type == InputType.NATURAL_LANG:
             self._conversation.add_message("user", text)
             self.ai_query_requested.emit(text)
-
         else:
             self.search_requested.emit(text)
-
     # ── Sugerencias ──────────────────────────────────────────────────────────
 
     def _on_text_changed(self, text: str) -> None:
@@ -377,7 +353,6 @@ class ConversationalNavBar(QLineEdit):
         if not self.hasFocus():
             return
         self._suggestion_timer.start()
-
     def _update_suggestions(self) -> None:
         """Genera sugerencias basadas en el texto actual."""
         # No mostrar si la barra no tiene foco (ej. URL actualizada al navegar)
@@ -388,19 +363,16 @@ class ConversationalNavBar(QLineEdit):
         if len(text) < 2:
             self._dropdown.hide()
             return
-
         suggestions: List[Dict[str, str]] = []
         input_type = self._classify_input(text)
 
         if input_type == InputType.NATURAL_LANG:
             suggestions.append({"icon": "🤖", "text": f"Preguntar a la IA: {text}", "type": "ai"})
             suggestions.append({"icon": "✨", "text": f"GenTab: {text}", "type": "gentab"})
-
         suggestions.append({"icon": "🔍", "text": f"Buscar: {text}", "type": "search"})
 
         if "." in text and " " not in text:
             suggestions.insert(0, {"icon": "🌐", "text": f"Ir a: {text}", "type": "url"})
-
         history = self._conversation.get_context_window()
         for msg in reversed(history[-3:]):
             if msg["role"] == "user" and text.lower() in msg["content"].lower():
@@ -409,7 +381,6 @@ class ConversationalNavBar(QLineEdit):
                     "text": msg["content"],
                     "type": "history",
                 })
-
         if suggestions:
             self._dropdown.set_suggestions(suggestions)
             pos = self.mapToGlobal(self.rect().bottomLeft())
@@ -418,7 +389,6 @@ class ConversationalNavBar(QLineEdit):
             self._dropdown.show()
         else:
             self._dropdown.hide()
-
     def _on_suggestion_selected(self, text: str) -> None:
         """Procesa la selección de una sugerencia del dropdown."""
         for prefix in ("Preguntar a la IA: ", "GenTab: ", "Buscar: ", "Ir a: "):
@@ -429,18 +399,15 @@ class ConversationalNavBar(QLineEdit):
                 return
         self.setText(text)
         self._dispatch(text)
-
     def _get_ai_suggestions(self, text: str) -> List[str]:
         """Genera sugerencias contextuales de IA (stub para extensión futura).
 
         Args:
             text: Texto parcial del usuario.
-
         Returns:
             Lista de sugerencias textuales.
         """
         return []
-
     # ── Métodos públicos ─────────────────────────────────────────────────────
 
     def set_placeholder_with_suggestion(self, suggestion: str) -> None:
@@ -450,7 +417,6 @@ class ConversationalNavBar(QLineEdit):
             suggestion: Texto de sugerencia.
         """
         self.setPlaceholderText(suggestion)
-
     def insertFromMimeData(self, source) -> None:
         """Maneja pegado de URLs — navega directamente si es URL."""
         super().insertFromMimeData(source)

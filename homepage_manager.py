@@ -39,13 +39,11 @@ class HomepageManager(QObject):
 
         # Cargar configuración guardada
         self.load_settings()
-
     def load_settings(self):
         """Cargar configuración guardada"""
         self.homepage_type = self.settings.value("homepage_type", self.HOME_SEARCH_ENGINE)
         self.custom_url = self.settings.value("custom_url", "https://www.google.com")
         self.use_for_new_tabs = self.settings.value("use_for_new_tabs", True, type=bool)
-
     def save_settings(self):
         """Guardar configuración"""
         self.settings.setValue("homepage_type", self.homepage_type)
@@ -53,7 +51,6 @@ class HomepageManager(QObject):
         self.settings.setValue("use_for_new_tabs", self.use_for_new_tabs)
         self.settings.sync()
         self.homepage_changed.emit()
-
     def get_homepage_url(self):
         """
         Obtener URL de página de inicio según configuración
@@ -63,7 +60,6 @@ class HomepageManager(QObject):
         """
         if self.homepage_type == self.HOME_BLANK:
             return "about:blank"
-
         elif self.homepage_type == self.HOME_SEARCH_ENGINE:
             # Usar motor de búsqueda predeterminado
             if hasattr(self.parent_window, 'search_engine_manager') and self.parent_window.search_engine_manager:
@@ -87,16 +83,12 @@ class HomepageManager(QObject):
                     elif engine.id == 'stackoverflow':
                         return "https://stackoverflow.com"
             return "https://duckduckgo.com"  # Fallback
-
         elif self.homepage_type == self.HOME_CUSTOM_URL:
             return self.custom_url
-
         elif self.homepage_type == self.HOME_NEW_TAB_PAGE:
             # Página de nueva pestaña personalizada (futuro)
             return "about:newtab"  # Placeholder
-
         return "https://duckduckgo.com"  # Fallback
-
     def get_new_tab_url(self):
         """
         Obtener URL para nuevas pestañas
@@ -132,7 +124,6 @@ class HomepageSettingsDialog(QDialog):
 
         self.setup_ui()
         self.load_current_settings()
-
     def setup_ui(self):
         """Configurar interfaz"""
         layout = QVBoxLayout(self)
@@ -166,7 +157,6 @@ class HomepageSettingsDialog(QDialog):
                 engine_info = QLabel(f"    Actual: {engine.name}")
                 engine_info.setStyleSheet("color: #666; font-size: 11px; margin-left: 24px;")
                 home_layout.addWidget(engine_info)
-
         # Opción 3: URL personalizada
         self.custom_radio = QRadioButton("URL personalizada:")
         self.button_group.addButton(self.custom_radio, 2)
@@ -258,7 +248,6 @@ class HomepageSettingsDialog(QDialog):
         buttons_layout.addWidget(save_btn)
 
         layout.addLayout(buttons_layout)
-
     def load_current_settings(self):
         """Cargar configuración actual"""
         # Seleccionar radio button según tipo
@@ -268,18 +257,15 @@ class HomepageSettingsDialog(QDialog):
             self.search_engine_radio.setChecked(True)
         elif self.homepage_manager.homepage_type == HomepageManager.HOME_CUSTOM_URL:
             self.custom_radio.setChecked(True)
-
         # Cargar URL personalizada
         self.custom_url_input.setText(self.homepage_manager.custom_url)
 
         # Cargar configuración de nuevas pestañas
         self.use_for_new_tabs_check.setChecked(self.homepage_manager.use_for_new_tabs)
-
     def on_custom_url_changed(self, text):
         """Al cambiar la URL personalizada, seleccionar automáticamente el radio"""
         if text.strip():
             self.custom_radio.setChecked(True)
-
     def use_current_page(self):
         """Usar la página actual como página de inicio"""
         try:
@@ -297,13 +283,11 @@ class HomepageSettingsDialog(QDialog):
                             f"Página de inicio configurada a:\n{current_url}"
                         )
                         return
-
             QMessageBox.warning(
                 self,
                 "Sin página actual",
                 "No hay una página válida en la pestaña actual."
             )
-
         except Exception as e:
             print(f"[Homepage] Error using current page: {e}")
             QMessageBox.warning(
@@ -311,7 +295,6 @@ class HomepageSettingsDialog(QDialog):
                 "Error",
                 "No se pudo usar la página actual."
             )
-
     def save_settings(self):
         """Guardar configuración"""
         # Determinar tipo seleccionado
@@ -331,7 +314,6 @@ class HomepageSettingsDialog(QDialog):
                 )
                 return
             self.homepage_manager.custom_url = custom_url
-
         # Guardar configuración de nuevas pestañas
         self.homepage_manager.use_for_new_tabs = self.use_for_new_tabs_check.isChecked()
 

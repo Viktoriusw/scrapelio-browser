@@ -33,7 +33,6 @@ class FindInPageBar(QWidget):
         self.setup_ui()
         self.setup_shortcuts()
         self.hide()  # Oculta por defecto
-
     def setup_ui(self):
         """Configurar interfaz de usuario"""
         layout = QHBoxLayout(self)
@@ -120,7 +119,6 @@ class FindInPageBar(QWidget):
                 font-size: 12px;
             }
         """)
-
     def setup_shortcuts(self):
         """Configurar atajos de teclado"""
         # Esc para cerrar
@@ -134,11 +132,9 @@ class FindInPageBar(QWidget):
         # Shift+F3 para anterior
         self.shift_f3_shortcut = QShortcut(QKeySequence(Qt.SHIFT | Qt.Key_F3), self)
         self.shift_f3_shortcut.activated.connect(self.find_previous)
-
     def set_current_page(self, page):
         """Establecer la página actual donde buscar"""
         self.current_page = page
-
     def on_search_changed(self):
         """Manejar cambio en el texto de búsqueda"""
         search_text = self.search_input.text()
@@ -150,33 +146,27 @@ class FindInPageBar(QWidget):
                 # Limpiar búsqueda anterior
                 self.current_page.findText("")
             return
-
         # Solo buscar si el texto cambió
         if search_text != self.last_search_text:
             self.last_search_text = search_text
             self.current_match = 1
             self.find_text(search_text)
-
     def find_text(self, text, backward=False):
         """Buscar texto en la página"""
         if not self.current_page or not text:
             return
-
         # Configurar flags de búsqueda
         flags = QWebEnginePage.FindFlag(0)
 
         if self.case_checkbox.isChecked():
             flags |= QWebEnginePage.FindCaseSensitively
-
         if backward:
             flags |= QWebEnginePage.FindBackward
-
         # Ejecutar búsqueda
         self.current_page.findText(text, flags, self.on_find_result)
 
         # Contar coincidencias totales usando JavaScript
         self.count_matches(text)
-
     def on_find_result(self, found):
         """Callback cuando se encuentra (o no) el texto"""
         if found:
@@ -184,12 +174,10 @@ class FindInPageBar(QWidget):
         else:
             if self.search_input.text():  # Solo si hay texto
                 self.search_input.setStyleSheet("QLineEdit { background-color: #f8d7da; }")
-
     def count_matches(self, text):
         """Contar el total de coincidencias usando JavaScript"""
         if not self.current_page:
             return
-
         # Escapar caracteres especiales en regex
         escaped_text = text.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
 
@@ -217,53 +205,42 @@ class FindInPageBar(QWidget):
         """
 
         self.current_page.runJavaScript(js_code, self.update_counter)
-
     def update_counter(self, total):
         """Actualizar el contador de coincidencias"""
         if total is None:
             total = 0
-
         self.total_matches = total
 
         if total > 0:
             self.counter_label.setText(f"{self.current_match} de {total}")
         else:
             self.counter_label.setText("0 de 0")
-
     def find_next(self):
         """Buscar siguiente coincidencia"""
         text = self.search_input.text()
         if not text:
             return
-
         if self.total_matches > 0:
             self.current_match = min(self.current_match + 1, self.total_matches)
-
         self.find_text(text, backward=False)
-
     def find_previous(self):
         """Buscar coincidencia anterior"""
         text = self.search_input.text()
         if not text:
             return
-
         if self.total_matches > 0:
             self.current_match = max(self.current_match - 1, 1)
-
         self.find_text(text, backward=True)
-
     def show_and_focus(self):
         """Mostrar la barra y dar foco al campo de búsqueda"""
         self.show()
         self.search_input.setFocus()
         self.search_input.selectAll()
-
     def close_find_bar(self):
         """Cerrar la barra de búsqueda"""
         # Limpiar búsqueda
         if self.current_page:
             self.current_page.findText("")
-
         self.search_input.clear()
         self.counter_label.setText("0 de 0")
         self.current_match = 0
@@ -283,14 +260,12 @@ class FindInPageManager:
         # Conectar cambio de pestaña
         if hasattr(tab_manager, 'tabs'):
             tab_manager.tabs.currentChanged.connect(self.on_tab_changed)
-
     def on_tab_changed(self, index):
         """Actualizar página actual cuando cambia la pestaña"""
         if index >= 0:
             current_tab = self.tab_manager.tabs.widget(index)
             if current_tab and hasattr(current_tab, 'page'):
                 self.find_bar.set_current_page(current_tab.page())
-
     def activate_find(self):
         """Activar búsqueda en la pestaña actual"""
         # Obtener pestaña actual

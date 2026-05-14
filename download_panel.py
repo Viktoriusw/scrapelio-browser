@@ -39,7 +39,6 @@ class DownloadPanel(QWidget):
         self.setup_database()
         self.setup_ui()
         self.load_history()
-
     def setup_database(self):
         """Crear base de datos para historial de descargas"""
         try:
@@ -62,7 +61,6 @@ class DownloadPanel(QWidget):
             print("[DownloadPanel] Database initialized")
         except Exception as e:
             print(f"[DownloadPanel] Error creating database: {e}")
-
     def setup_ui(self):
         """Configurar interfaz de usuario"""
         layout = QVBoxLayout(self)
@@ -140,7 +138,6 @@ class DownloadPanel(QWidget):
                 background-color: #d0d0d0;
             }
         """)
-
     def add_download(self, download_request):
         """Agregar nueva descarga al panel"""
         # Ocultar mensaje de vacío
@@ -166,7 +163,6 @@ class DownloadPanel(QWidget):
         self.downloads.append(download_widget)
 
         print(f"[DownloadPanel] Added download: {download_request.suggestedFileName()}")
-
     def remove_download_widget(self, widget):
         """Remover widget de descarga"""
         if widget in self.downloads:
@@ -180,35 +176,28 @@ class DownloadPanel(QWidget):
                         widget.download_removed.disconnect(connections['download_removed'])
                 except:
                     pass
-
                 try:
                     if 'download_finished' in connections:
                         widget.download_finished.disconnect(connections['download_finished'])
                 except:
                     pass
-
                 del self._signal_connections[widget_id]
-
             self.downloads.remove(widget)
             self.downloads_layout.removeWidget(widget)
             widget.deleteLater()
-
         # Mostrar mensaje de vacío si no hay descargas
         if not self.downloads:
             self.empty_label.show()
-
     def clear_completed(self):
         """Limpiar descargas completadas"""
         for widget in self.downloads[:]:  # Copiar lista para modificar durante iteración
             if widget.is_finished():
                 self.remove_download_widget(widget)
-
     def open_downloads_folder(self):
         """Abrir carpeta de descargas del sistema"""
         from PySide6.QtCore import QStandardPaths
         download_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
         QDesktopServices.openUrl(QUrl.fromLocalFile(download_dir))
-
     def save_to_history(self, filename, url, path, size, status):
         """Guardar descarga en historial"""
         try:
@@ -225,7 +214,6 @@ class DownloadPanel(QWidget):
             print(f"[DownloadPanel] Saved to history: {filename}")
         except Exception as e:
             print(f"[DownloadPanel] Error saving to history: {e}")
-
     def load_history(self):
         """Cargar historial de descargas (últimas 10)"""
         try:
@@ -245,11 +233,9 @@ class DownloadPanel(QWidget):
                 if os.path.exists(path):
                     # TODO: Crear widget de historial (sin barra de progreso)
                     pass
-
             conn.close()
         except Exception as e:
             print(f"[DownloadPanel] Error loading history: {e}")
-
     def _disconnect_signals(self):
         """Desconectar todas las señales para prevenir memory leaks"""
         try:
@@ -260,14 +246,12 @@ class DownloadPanel(QWidget):
                     del self._signal_connections['clear_btn']
             except:
                 pass
-
             try:
                 if 'open_folder_btn' in self._signal_connections:
                     self.open_folder_btn.clicked.disconnect(self._signal_connections['open_folder_btn'])
                     del self._signal_connections['open_folder_btn']
             except:
                 pass
-
             # Desconectar señales de widgets de descarga
             for widget in self.downloads[:]:
                 widget_id = id(widget)
@@ -279,23 +263,18 @@ class DownloadPanel(QWidget):
                             widget.download_removed.disconnect(connections['download_removed'])
                     except:
                         pass
-
                     try:
                         if 'download_finished' in connections:
                             widget.download_finished.disconnect(connections['download_finished'])
                     except:
                         pass
-
                     del self._signal_connections[widget_id]
-
         except Exception as e:
             print(f"Error al desconectar señales del DownloadPanel: {str(e)}")
-
     def closeEvent(self, event):
         """Manejar cierre del panel"""
         self._disconnect_signals()
         super().closeEvent(event)
-
     def __del__(self):
         """Destructor del panel"""
         self._disconnect_signals()
@@ -321,7 +300,6 @@ class DownloadItemWidget(QWidget):
 
         self.setup_ui()
         self.connect_signals()
-
     def setup_ui(self):
         """Configurar interfaz del item"""
         main_layout = QVBoxLayout(self)
@@ -427,12 +405,10 @@ class DownloadItemWidget(QWidget):
         container_layout.addLayout(actions_layout)
 
         main_layout.addWidget(container)
-
     def connect_signals(self):
         """Conectar señales de descarga"""
         self.download.receivedBytesChanged.connect(self.update_progress)
         self.download.stateChanged.connect(self.on_state_changed)
-
     def disconnect_signals(self):
         """Desconectar señales para prevenir memory leaks"""
         try:
@@ -443,16 +419,13 @@ class DownloadItemWidget(QWidget):
             self.download.stateChanged.disconnect(self.on_state_changed)
         except:
             pass
-
     def closeEvent(self, event):
         """Manejar cierre del widget"""
         self.disconnect_signals()
         super().closeEvent(event)
-
     def __del__(self):
         """Destructor del widget"""
         self.disconnect_signals()
-
     def update_progress(self):
         """Actualizar progreso de descarga"""
         received = self.download.receivedBytes()
@@ -478,7 +451,6 @@ class DownloadItemWidget(QWidget):
                 self.speeds.append(speed)
                 if len(self.speeds) > 10:
                     self.speeds.pop(0)
-
                 avg_speed = sum(self.speeds) / len(self.speeds) if self.speeds else 0
                 self.speed_label.setText(f"{self.format_size(avg_speed)}/s")
 
@@ -487,10 +459,8 @@ class DownloadItemWidget(QWidget):
                     remaining_bytes = total - received
                     remaining_seconds = remaining_bytes / avg_speed
                     self.time_label.setText(f"⏱ {self.format_time(remaining_seconds)}")
-
                 self.last_received = received
                 self.last_time = current_time
-
     def on_state_changed(self, state):
         """Manejar cambios de estado"""
         if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
@@ -499,7 +469,6 @@ class DownloadItemWidget(QWidget):
             self.on_download_cancelled()
         elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
             self.on_download_failed()
-
     def on_download_completed(self):
         """Descarga completada"""
         self.progress_bar.setValue(100)
@@ -533,7 +502,6 @@ class DownloadItemWidget(QWidget):
         )
 
         print(f"[Download] Completed: {self.filename}")
-
     def on_download_cancelled(self):
         """Descarga cancelada"""
         self.speed_label.setText("❌ Cancelada")
@@ -543,7 +511,6 @@ class DownloadItemWidget(QWidget):
                 background-color: #dc3545;
             }
         """)
-
     def on_download_failed(self):
         """Descarga fallida"""
         self.speed_label.setText("⚠️ Error")
@@ -553,7 +520,6 @@ class DownloadItemWidget(QWidget):
                 background-color: #ffc107;
             }
         """)
-
     def toggle_pause(self):
         """Pausar/reanudar descarga"""
         if self.is_paused:
@@ -569,7 +535,6 @@ class DownloadItemWidget(QWidget):
             self.is_paused = True
             self.speed_label.setText("⏸ Pausada")
             self.time_label.setText("")
-
     def cancel_download(self):
         """Cancelar descarga"""
         reply = QMessageBox.question(
@@ -581,7 +546,6 @@ class DownloadItemWidget(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             self.download.cancel()
-
     def open_file(self):
         """Abrir archivo descargado"""
         if self.path and os.path.exists(self.path):
@@ -589,13 +553,11 @@ class DownloadItemWidget(QWidget):
         else:
             QMessageBox.warning(self, "Archivo no encontrado",
                               "El archivo descargado ya no existe en la ubicación original.")
-
     def open_folder(self):
         """Abrir carpeta contenedora"""
         if self.path:
             folder = os.path.dirname(self.path)
             QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
-
     def is_finished(self):
         """Verificar si la descarga terminó"""
         state = self.download.state()
@@ -604,7 +566,6 @@ class DownloadItemWidget(QWidget):
             QWebEngineDownloadRequest.DownloadState.DownloadCancelled,
             QWebEngineDownloadRequest.DownloadState.DownloadInterrupted
         ]
-
     def update_icon(self):
         """Actualizar icono según tipo de archivo"""
         ext = os.path.splitext(self.filename)[1].lower()
@@ -623,7 +584,6 @@ class DownloadItemWidget(QWidget):
         }
 
         self.icon_label.setText(icons.get(ext, '📄'))
-
     @staticmethod
     def format_size(bytes_size):
         """Formatear tamaño en bytes a formato legible"""
@@ -632,7 +592,6 @@ class DownloadItemWidget(QWidget):
                 return f"{bytes_size:.1f} {unit}"
             bytes_size /= 1024.0
         return f"{bytes_size:.1f} TB"
-
     @staticmethod
     def format_time(seconds):
         """Formatear segundos a formato legible"""

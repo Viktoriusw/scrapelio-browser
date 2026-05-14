@@ -83,7 +83,6 @@ def _format_record_html(record: logging.LogRecord) -> str:
             f'font-family:monospace;font-size:11px;white-space:pre-wrap;">'
             f'{exc_text}</div>'
         )
-
     return (
         f'<div style="padding:2px 6px;border-bottom:1px solid rgba(255,255,255,0.04);'
         f'background:{bg_color};">'
@@ -107,7 +106,6 @@ class LogViewerPanel(BasePanel):
             (self._create_file_tab,  "📄 Fichero log"),
             (self._create_stats_tab, "📊 Estadísticas"),
         ]
-
     def post_setup_ui(self):
         self.set_object_name("logViewerPanel")
         self._min_level = logging.DEBUG
@@ -126,7 +124,54 @@ class LogViewerPanel(BasePanel):
 
         # Cargar registros previos (buffer en memoria)
         QTimer.singleShot(100, self._load_initial_records)
-
+    def _on_theme_changed(self, theme_name):
+        """Recarga los estilos del panel cuando cambia el tema global."""
+        super()._on_theme_changed(theme_name)
+        self._apply_dynamic_styles()
+    def _apply_dynamic_styles(self):
+        """Aplica los estilos dinámicos de todos los widgets usando el ThemeEngine activo."""
+        c = self.get_theme_colors()
+        text_view_style = (
+            f"QTextEdit {{ background: {c['surface_0']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 8px;"
+            f" selection-background-color: {c['selected']}; }}"
+        )
+        btn_style = (
+            f"QPushButton {{ background: {c['surface_1']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 6px;"
+            f" padding: 4px 10px; font-size: 12px; }}"
+            f" QPushButton:hover {{ background: {c['surface_hover']}; }}"
+            f" QPushButton:checked {{ background: {c['error_subtle']}; color: {c['error']};"
+            f" border-color: {c['error']}; }}"
+        )
+        combo_style = (
+            f"QComboBox {{ background: {c['input_bg']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 6px;"
+            f" padding: 3px 8px; font-size: 12px; }}"
+            f" QComboBox::drop-down {{ border: none; }}"
+            f" QComboBox QAbstractItemView {{ background: {c['input_bg']}; color: {c['text_primary']}; }}"
+        )
+        input_style = (
+            f"QLineEdit {{ background: {c['input_bg']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 6px;"
+            f" padding: 3px 8px; font-size: 12px; }}"
+            f" QLineEdit:focus {{ border-color: {c['input_focus']}; }}"
+        )
+        count_style = f"color: {c['text_secondary']}; font-size: 11px;"
+        for attr, style in [
+            ("_log_view", text_view_style),
+            ("_file_view", text_view_style),
+            ("_stats_text", text_view_style),
+            ("_pause_btn", btn_style),
+            ("_level_combo", combo_style),
+            ("_module_input", input_style),
+            ("_search_input", input_style),
+            ("_count_label", count_style),
+            ("_file_path_label", count_style),
+        ]:
+            w = getattr(self, attr, None)
+            if w:
+                w.setStyleSheet(style)
     # ── Tab "En vivo" ─────────────────────────────────────────────────────────
 
     def _create_live_tab(self) -> QWidget:
@@ -185,7 +230,6 @@ class LogViewerPanel(BasePanel):
 
         # ── Contador de registros ─────────────────────────────────────────────
         self._count_label = QLabel("0 registros")
-        self._count_label.setStyleSheet("color: #64748b; font-size: 11px;")
         layout.addWidget(self._count_label)
 
         # ── Área de logs ──────────────────────────────────────────────────────
@@ -193,15 +237,6 @@ class LogViewerPanel(BasePanel):
         self._log_view.setReadOnly(True)
         self._log_view.setObjectName("logView")
         self._log_view.setFont(QFont("Monospace", 11))
-        self._log_view.setStyleSheet("""
-            QTextEdit#logView {
-                background: #0d1117;
-                color: #e2e8f0;
-                border: 1px solid rgba(99,102,241,0.25);
-                border-radius: 8px;
-                selection-background-color: rgba(99,102,241,0.4);
-            }
-        """)
         self._log_view.setLineWrapMode(QTextEdit.NoWrap)
         layout.addWidget(self._log_view, 1)
 
@@ -224,49 +259,11 @@ class LogViewerPanel(BasePanel):
 
         layout.addLayout(bottom)
 
-        self._apply_toolbar_style()
+        self._apply_dynamic_styles()
         return widget
-
     def _apply_toolbar_style(self):
-        _btn_style = """
-            QPushButton {
-                background: rgba(99,102,241,0.15); color: #c7d2fe;
-                border: 1px solid rgba(99,102,241,0.35); border-radius: 6px;
-                padding: 4px 10px; font-size: 12px;
-            }
-            QPushButton:hover { background: rgba(99,102,241,0.35); }
-            QPushButton:checked { background: rgba(239,68,68,0.25); color: #fca5a5;
-                                  border-color: rgba(239,68,68,0.5); }
-        """
-        for widget in [
-            getattr(self, "_pause_btn", None),
-        ]:
-            if widget:
-                widget.setStyleSheet(_btn_style)
-
-        _combo_style = """
-            QComboBox { background: #1e2340; color: #e2e8f0;
-                        border: 1px solid rgba(99,102,241,0.35); border-radius: 6px;
-                        padding: 3px 8px; font-size: 12px; }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView { background: #1e2340; color: #e2e8f0; }
-        """
-        if hasattr(self, "_level_combo"):
-            self._level_combo.setStyleSheet(_combo_style)
-
-        _input_style = """
-            QLineEdit { background: #1e2340; color: #e2e8f0;
-                        border: 1px solid rgba(99,102,241,0.35); border-radius: 6px;
-                        padding: 3px 8px; font-size: 12px; }
-            QLineEdit:focus { border-color: #6366f1; }
-        """
-        for w in [
-            getattr(self, "_module_input", None),
-            getattr(self, "_search_input", None),
-        ]:
-            if w:
-                w.setStyleSheet(_input_style)
-
+        """Delegado a _apply_dynamic_styles para compatibilidad."""
+        self._apply_dynamic_styles()
     # ── Tab "Fichero log" ─────────────────────────────────────────────────────
 
     def _create_file_tab(self) -> QWidget:
@@ -277,7 +274,6 @@ class LogViewerPanel(BasePanel):
 
         header = QHBoxLayout()
         self._file_path_label = QLabel(f"📄 {LOG_FILE_PATH}")
-        self._file_path_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
         self._file_path_label.setWordWrap(True)
         header.addWidget(self._file_path_label, 1)
 
@@ -289,19 +285,12 @@ class LogViewerPanel(BasePanel):
         self._file_view = QTextEdit()
         self._file_view.setReadOnly(True)
         self._file_view.setFont(QFont("Monospace", 10))
-        self._file_view.setStyleSheet("""
-            QTextEdit {
-                background: #0d1117; color: #c9d1d9;
-                border: 1px solid rgba(99,102,241,0.25); border-radius: 8px;
-            }
-        """)
         self._file_view.setLineWrapMode(QTextEdit.NoWrap)
         layout.addWidget(self._file_view, 1)
 
         # Cargar últimas 500 líneas al crear
         QTimer.singleShot(200, self._reload_file_tab)
         return widget
-
     def _reload_file_tab(self):
         if not hasattr(self, "_file_view"):
             return
@@ -317,7 +306,6 @@ class LogViewerPanel(BasePanel):
             self._file_view.moveCursor(QTextCursor.End)
         except Exception as exc:
             self._file_view.setPlainText(f"Error leyendo log: {exc}")
-
     # ── Tab "Estadísticas" ────────────────────────────────────────────────────
 
     def _create_stats_tab(self) -> QWidget:
@@ -328,12 +316,6 @@ class LogViewerPanel(BasePanel):
 
         self._stats_text = QTextEdit()
         self._stats_text.setReadOnly(True)
-        self._stats_text.setStyleSheet("""
-            QTextEdit {
-                background: #0d1117; color: #e2e8f0;
-                border: 1px solid rgba(99,102,241,0.25); border-radius: 8px;
-            }
-        """)
         layout.addWidget(self._stats_text, 1)
 
         refresh_btn = QPushButton("🔄 Actualizar estadísticas")
@@ -342,7 +324,6 @@ class LogViewerPanel(BasePanel):
 
         QTimer.singleShot(300, self._refresh_stats)
         return widget
-
     def _refresh_stats(self):
         if not hasattr(self, "_stats_text"):
             return
@@ -356,7 +337,6 @@ class LogViewerPanel(BasePanel):
             by_level[r.levelno] = by_level.get(r.levelno, 0) + 1
             mod = r.name.split(".")[0]
             by_module[mod] = by_module.get(mod, 0) + 1
-
         lines = [
             f"<h3 style='color:#c7d2fe;'>Estadísticas del buffer en memoria</h3>",
             f"<p>Total registros: <b style='color:#4ade80;'>{total}</b> / {2000}</p>",
@@ -387,9 +367,7 @@ class LogViewerPanel(BasePanel):
                 f"<p>Tamaño fichero log: <b style='color:#fbbf24;'>{size_kb:.1f} KB</b></p>"
             )
             lines.append(f"<p style='color:#475569;font-size:11px;'>{LOG_FILE_PATH}</p>")
-
         self._stats_text.setHtml("".join(lines))
-
     # ── Lógica de actualización ───────────────────────────────────────────────
 
     def _on_new_record(self, record: logging.LogRecord) -> None:
@@ -398,7 +376,6 @@ class LogViewerPanel(BasePanel):
         if not self._record_passes_filter(record):
             return
         self._pending_html.append(_format_record_html(record))
-
     def _flush_pending(self) -> None:
         if not self._pending_html or not hasattr(self, "_log_view"):
             return
@@ -411,9 +388,7 @@ class LogViewerPanel(BasePanel):
 
         if self._auto_scroll:
             self._log_view.moveCursor(QTextCursor.End)
-
         self._update_count_label()
-
     def _load_initial_records(self) -> None:
         """Carga los registros que ya estaban en el buffer al abrir el panel."""
         if not hasattr(self, "_log_view"):
@@ -430,7 +405,6 @@ class LogViewerPanel(BasePanel):
             if self._auto_scroll:
                 self._log_view.moveCursor(QTextCursor.End)
         self._update_count_label()
-
     def _record_passes_filter(self, record: logging.LogRecord) -> bool:
         if record.levelno < self._min_level:
             return False
@@ -439,13 +413,11 @@ class LogViewerPanel(BasePanel):
         if self._search_filter and self._search_filter.lower() not in record.getMessage().lower():
             return False
         return True
-
     def _on_filter_changed(self) -> None:
         self._min_level = self._level_combo.currentData() or logging.DEBUG
         self._module_filter = self._module_input.text().strip() if hasattr(self, "_module_input") else ""
         self._search_filter = self._search_input.text().strip() if hasattr(self, "_search_input") else ""
         self._reload_live_view()
-
     def _reload_live_view(self) -> None:
         if not hasattr(self, "_log_view"):
             return
@@ -460,7 +432,6 @@ class LogViewerPanel(BasePanel):
         if self._auto_scroll:
             self._log_view.moveCursor(QTextCursor.End)
         self._update_count_label()
-
     def _update_count_label(self) -> None:
         if not hasattr(self, "_count_label"):
             return
@@ -468,18 +439,15 @@ class LogViewerPanel(BasePanel):
         total = len(handler.get_records())
         visible = len(handler.get_records(self._min_level))
         self._count_label.setText(f"{visible} visibles / {total} totales en buffer")
-
     def _on_pause_toggled(self, paused: bool) -> None:
         self._paused = paused
         if hasattr(self, "_pause_btn"):
             self._pause_btn.setText("▶ Reanudar" if paused else "⏸ Pausar")
-
     def _clear_view(self) -> None:
         if hasattr(self, "_log_view"):
             self._log_view.clear()
         get_memory_handler().clear()
         self._update_count_label()
-
     def _export_filtered(self) -> None:
         handler = get_memory_handler()
         records = handler.get_records()
@@ -509,7 +477,6 @@ class LogViewerPanel(BasePanel):
             QMessageBox.information(self, "Exportar", f"Exportados {len(filtered)} registros a:\n{filename}")
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
-
     def _open_log_file(self) -> None:
         """Abre el fichero .log con el editor/visor predeterminado del sistema."""
         if not os.path.exists(LOG_FILE_PATH):

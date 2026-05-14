@@ -61,14 +61,12 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         self.blocked_count = 0
         self.request_log = []
         self.max_log_size = 1000
-
     def _get_config_db_path(self):
         """Obtiene la ruta de la base de datos de configuración"""
         app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
         config_dir = os.path.join(app_data, "Scrapelio", "Network")
         os.makedirs(config_dir, exist_ok=True)
         return os.path.join(config_dir, "network_config.db")
-
     def _init_database(self):
         """Inicializa la base de datos de configuración"""
         conn = sqlite3.connect(self.config_db)
@@ -116,7 +114,6 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
 
         conn.commit()
         conn.close()
-
     def load_configuration(self):
         """Cargar configuración desde la base de datos"""
         conn = sqlite3.connect(self.config_db)
@@ -153,13 +150,11 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
                 'type': pattern_type,
                 'compiled': self._compile_pattern(pattern, pattern_type)
             })
-
         # Cargar headers personalizados
         cursor.execute("SELECT name, value FROM custom_headers WHERE enabled = 1")
         self.custom_headers = {name: value for name, value in cursor.fetchall()}
 
         conn.close()
-
     def _compile_pattern(self, pattern, pattern_type):
         """Compilar patrón según el tipo"""
         try:
@@ -176,7 +171,6 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         except Exception as e:
             print(f"[WARNING] Error compiling pattern '{pattern}': {e}")
             return None
-
     def save_configuration(self):
         """Guardar configuración en la base de datos"""
         conn = sqlite3.connect(self.config_db)
@@ -196,10 +190,8 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
                 INSERT OR REPLACE INTO config (key, value)
                 VALUES (?, ?)
             ''', (key, value))
-
         conn.commit()
         conn.close()
-
     def interceptRequest(self, info: QWebEngineUrlRequestInfo):
         """
         Interceptar y modificar peticiones HTTP
@@ -213,7 +205,6 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             if any(p in url for p in ('stun:', 'turn:', 'stuns:', 'turns:')):
                 info.block(True)
                 return
-
         url = info.requestUrl().toString()
         method = info.requestMethod().data().decode('utf-8')
 
@@ -228,10 +219,8 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
 
             if self.enable_logging:
                 self._log_request(url, method, blocked=True)
-
             print(f"[BLOCKED] {method} {url}")
             return
-
         # Modificar User-Agent
         user_agent = self._get_user_agent()
         if user_agent:
@@ -239,11 +228,9 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             # Debug: mostrar solo para la primera petición de cada página
             if 'text/html' in url or self.request_count % 100 == 1:
                 print(f"[UA] Applying User-Agent ({self.user_agent_type}): {user_agent[:80]}...")
-
         # Agregar/modificar headers
         if self.enable_dnt:
             info.setHttpHeader(b'DNT', b'1')
-
         # No bloquear Referer en peticiones de medios: CDNs de vídeo (phncdn, etc.)
         # requieren Referer para servir contenido; si se elimina → 403 → MediaError UNKNOWN_ERROR
         if self.block_referer:
@@ -263,25 +250,20 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
                     info.setHttpHeader(b'Referer', b'')
             except Exception:
                 info.setHttpHeader(b'Referer', b'')
-
         # Headers personalizados
         for header_name, header_value in self.custom_headers.items():
             info.setHttpHeader(header_name.encode('utf-8'), header_value.encode('utf-8'))
-
         # Logging
         if self.enable_logging:
             self._log_request(url, method, blocked=False)
-
         # Emitir señal
         self.request_intercepted.emit(url, method)
-
     def _is_media_url(self, url: str) -> bool:
         """Indica si la URL parece ser de contenido multimedia (vídeo/audio)."""
         url_lower = url.lower()
         media_ext = ('.mp4', '.m3u8', '.ts', '.webm', '.mpd', '.m4s', '.m4a')
         media_hints = ('phncdn', 'googlevideo', '/video/', '/media/', '/stream/', 'cloudfront')
         return any(ext in url_lower for ext in media_ext) or any(h in url_lower for h in media_hints)
-
     def _should_block_url(self, url):
         """Verificar si una URL debe ser bloqueada"""
 
@@ -294,13 +276,15 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             'recaptcha.net',    # CAPTCHA de Google
             'googleusercontent.com',  # Contenido de Google
             'phncdn.com',       # CDN de vídeo (evitar bloquear reproducción)
+            'challenges.cloudflare.com',  # Cloudflare Turnstile CAPTCHA
+            'cloudflare.com',             # Cloudflare CDN/servicios
+            'cloudflareinsights.com',     # Telemetría requerida por Turnstile
         ]
 
         # Verificar si la URL pertenece a un dominio en whitelist
         for domain in WHITELIST_DOMAINS:
             if domain in url:
                 return False  # ✅ NO bloquear - dominio en whitelist
-
         # Continuar con la lógica de bloqueo normal
         for pattern_info in self.blocked_patterns:
             pattern = pattern_info['compiled']
@@ -308,7 +292,6 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
 
             if pattern is None:
                 continue
-
             try:
                 if pattern_type == 'exact':
                     if url == pattern:
@@ -319,16 +302,13 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             except Exception as e:
                 print(f"[WARNING] Error matching pattern: {e}")
                 continue
-
         return False
-
     def _get_user_agent(self):
         """Obtener el User-Agent configurado"""
         if self.user_agent_type == 'Custom':
             return self.custom_user_agent if self.custom_user_agent else self.USER_AGENTS['Chrome']
         else:
             return self.USER_AGENTS.get(self.user_agent_type, self.USER_AGENTS['Chrome'])
-
     def _log_request(self, url, method, blocked=False):
         """Registrar petición en el log"""
         log_entry = {
@@ -343,11 +323,9 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         # Limitar tamaño del log en memoria
         if len(self.request_log) > self.max_log_size:
             self.request_log = self.request_log[-self.max_log_size:]
-
         # Opcionalmente guardar en base de datos
         # (desactivado por defecto para no llenar la BD)
         # self._save_log_to_db(log_entry)
-
     def _save_log_to_db(self, log_entry):
         """Guardar entrada de log en la base de datos"""
         try:
@@ -359,12 +337,10 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
                 VALUES (?, ?, ?, ?)
             ''', (log_entry['url'], log_entry['method'], log_entry['timestamp'],
                   1 if log_entry['blocked'] else 0))
-
             conn.commit()
             conn.close()
         except Exception as e:
             print(f"[WARNING] Error saving log to database: {e}")
-
     def add_blocked_pattern(self, pattern, pattern_type='wildcard'):
         """Agregar patrón de bloqueo"""
         try:
@@ -382,11 +358,9 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             # Recargar configuración
             self.load_configuration()
             return True
-
         except Exception as e:
             print(f"[ERROR] Error adding blocked pattern: {e}")
             return False
-
     def remove_blocked_pattern(self, pattern):
         """Eliminar patrón de bloqueo"""
         try:
@@ -401,11 +375,9 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             # Recargar configuración
             self.load_configuration()
             return True
-
         except Exception as e:
             print(f"[ERROR] Error removing blocked pattern: {e}")
             return False
-
     def get_blocked_patterns(self):
         """Obtener lista de patrones bloqueados"""
         conn = sqlite3.connect(self.config_db)
@@ -414,10 +386,8 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
         cursor.execute("SELECT pattern, type, enabled FROM blocked_urls ORDER BY created_at DESC")
         patterns = [{'pattern': p, 'type': t, 'enabled': bool(e)}
                    for p, t, e in cursor.fetchall()]
-
         conn.close()
         return patterns
-
     def get_stats(self):
         """Obtener estadísticas del interceptor"""
         return {
@@ -427,11 +397,9 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
             'user_agent': self.user_agent_type,
             'patterns_count': len(self.blocked_patterns)
         }
-
     def clear_log(self):
         """Limpiar log de peticiones"""
         self.request_log = []
-
     def reset_stats(self):
         """Resetear estadísticas"""
         self.request_count = 0
@@ -451,7 +419,6 @@ class NetworkSettingsDialog(QDialog):
 
         self.setup_ui()
         self.load_current_settings()
-
     def setup_ui(self):
         """Configurar interfaz del diálogo"""
         layout = QVBoxLayout(self)
@@ -490,7 +457,6 @@ class NetworkSettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         buttons.button(QDialogButtonBox.Apply).clicked.connect(self.apply_settings)
         layout.addWidget(buttons)
-
     def create_user_agent_tab(self):
         """Crear tab de configuración de User-Agent"""
         widget = QWidget()
@@ -553,7 +519,6 @@ class NetworkSettingsDialog(QDialog):
 
         layout.addStretch()
         return widget
-
     def create_blocking_tab(self):
         """Crear tab de bloqueo de URLs"""
         widget = QWidget()
@@ -618,7 +583,6 @@ class NetworkSettingsDialog(QDialog):
 
         layout.addStretch()
         return widget
-
     def create_headers_tab(self):
         """Crear tab de configuración de headers"""
         widget = QWidget()
@@ -650,7 +614,6 @@ class NetworkSettingsDialog(QDialog):
 
         layout.addStretch()
         return widget
-
     def create_stats_tab(self):
         """Crear tab de estadísticas"""
         widget = QWidget()
@@ -680,7 +643,6 @@ class NetworkSettingsDialog(QDialog):
 
         layout.addStretch()
         return widget
-
     def load_current_settings(self):
         """Cargar configuración actual"""
         # User-Agent
@@ -699,7 +661,6 @@ class NetworkSettingsDialog(QDialog):
 
         if ua_type == 'Custom':
             self.custom_ua_input.setText(self.interceptor.custom_user_agent)
-
         # Mostrar User-Agent ACTIVO (el que está en uso ahora)
         active_ua = self.interceptor._get_user_agent()
         self.ua_active.setText(f"{active_ua}\n\n(Tipo: {ua_type})")
@@ -717,7 +678,6 @@ class NetworkSettingsDialog(QDialog):
 
         # Update preview
         self.update_ua_preview()
-
     def refresh_blocked_list(self):
         """Refrescar lista de patrones bloqueados"""
         self.blocked_list.clear()
@@ -730,13 +690,11 @@ class NetworkSettingsDialog(QDialog):
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, pattern)
             self.blocked_list.addItem(item)
-
     def on_ua_changed(self, text):
         """Cuando cambia la selección de User-Agent"""
         is_custom = 'Custom' in text
         self.custom_ua_input.setEnabled(is_custom)
         self.update_ua_preview()
-
     def update_ua_preview(self):
         """Actualizar preview del User-Agent"""
         selected = self.ua_combo.currentText()
@@ -756,13 +714,10 @@ class NetworkSettingsDialog(QDialog):
             }
             ua_key = ua_map.get(selected, 'Chrome')
             ua = NetworkInterceptor.USER_AGENTS.get(ua_key, '')
-
         self.ua_preview.setText(ua)
-
     def add_block_pattern(self):
         """Agregar patrón de bloqueo desde input"""
         self.quick_add_pattern()
-
     def quick_add_pattern(self):
         """Agregar patrón rápidamente"""
         pattern = self.pattern_input.text().strip()
@@ -770,7 +725,6 @@ class NetworkSettingsDialog(QDialog):
         if not pattern:
             QMessageBox.warning(self, "Patrón vacío", "Por favor ingresa un patrón o URL.")
             return
-
         # Determinar tipo
         type_text = self.pattern_type_combo.currentText()
         if 'Wildcard' in type_text:
@@ -779,7 +733,6 @@ class NetworkSettingsDialog(QDialog):
             pattern_type = 'regex'
         else:
             pattern_type = 'exact'
-
         # Agregar al interceptor
         if self.interceptor.add_blocked_pattern(pattern, pattern_type):
             self.pattern_input.clear()
@@ -789,13 +742,11 @@ class NetworkSettingsDialog(QDialog):
         else:
             QMessageBox.critical(self, "Error",
                                "No se pudo agregar el patrón.")
-
     def remove_block_pattern(self):
         """Eliminar patrón seleccionado"""
         current_item = self.blocked_list.currentItem()
         if not current_item:
             return
-
         pattern = current_item.data(Qt.UserRole)
 
         reply = QMessageBox.question(
@@ -810,7 +761,6 @@ class NetworkSettingsDialog(QDialog):
                 self.refresh_blocked_list()
                 QMessageBox.information(self, "Patrón eliminado",
                                       f"El patrón '{pattern}' ha sido eliminado.")
-
     def update_stats(self):
         """Actualizar estadísticas"""
         stats = self.interceptor.get_stats()
@@ -827,7 +777,6 @@ Patrones de bloqueo activos: {stats['patterns_count']}
         """
 
         self.stats_text.setText(stats_text.strip())
-
     def reset_stats(self):
         """Resetear estadísticas"""
         reply = QMessageBox.question(
@@ -842,7 +791,6 @@ Patrones de bloqueo activos: {stats['patterns_count']}
             self.update_stats()
             QMessageBox.information(self, "Estadísticas reseteadas",
                                   "Las estadísticas han sido reseteadas.")
-
     def apply_settings(self):
         """Aplicar configuración sin cerrar"""
         self.save_settings()
@@ -861,7 +809,6 @@ Patrones de bloqueo activos: {stats['patterns_count']}
                 print(f"[UA-APPLY] ✓ Global User-Agent profile updated successfully")
             else:
                 print(f"[UA-APPLY] ⚠ Failed to update global User-Agent profile")
-
         # AUTOMÁTICO: Cerrar todas las pestañas y abrir una nueva con el User-Agent actualizado
         if hasattr(self.parent(), 'tab_manager') and self.parent().tab_manager:
             try:
@@ -870,7 +817,6 @@ Patrones de bloqueo activos: {stats['patterns_count']}
                 # Cerrar todas las pestañas actuales
                 while tab_manager.tabs.count() > 0:
                     tab_manager.tabs.removeTab(0)
-
                 # Abrir una nueva pestaña con el User-Agent actualizado
                 tab_manager.add_new_tab()
 
@@ -892,12 +838,10 @@ Patrones de bloqueo activos: {stats['patterns_count']}
                                   "✅ Los cambios han sido aplicados correctamente.\n\n"
                                   "⚠️ Cierra las pestañas actuales y abre nuevas\n"
                                   "para que el nuevo User-Agent se aplique.")
-
     def accept_settings(self):
         """Guardar y cerrar"""
         self.save_settings()
         self.accept()
-
     def save_settings(self):
         """Guardar configuración"""
         # User-Agent
@@ -919,7 +863,6 @@ Patrones de bloqueo activos: {stats['patterns_count']}
             self.interceptor.custom_user_agent = self.custom_ua_input.text()
         else:
             self.interceptor.custom_user_agent = ''
-
         # Headers
         self.interceptor.enable_dnt = self.dnt_check.isChecked()
         self.interceptor.block_referer = self.referer_check.isChecked()
@@ -927,11 +870,11 @@ Patrones de bloqueo activos: {stats['patterns_count']}
 
         # Guardar TODA la configuración en la base de datos (una sola vez)
         self.interceptor.save_configuration()
-        
+
         # CRÍTICO: Recargar la configuración en el interceptor para que los cambios se apliquen
         # Esto actualiza las variables en memoria del interceptor
         self.interceptor.load_configuration()
-        
+
         print(f"[NetworkSettings] ✓ Configuration saved and reloaded:")
         print(f"  - User-Agent type: {self.interceptor.user_agent_type}")
         if self.interceptor.user_agent_type == 'Custom':

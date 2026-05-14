@@ -41,6 +41,48 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# ─── ThemeEngine (opcional) ───────────────────────────────────────────────────
+try:
+    from ui.core.theme_engine import get_theme_engine
+    _THEME_AVAILABLE = True
+except ImportError:
+    _THEME_AVAILABLE = False
+    def get_theme_engine():
+        return None
+
+
+def _get_bookmark_theme_colors() -> dict:
+    """Retorna colores del tema activo para el panel de marcadores."""
+    if _THEME_AVAILABLE:
+        te = get_theme_engine()
+        if te:
+            data = te.get_theme_data()
+            colors = data.get("colors", {})
+            return {
+                "background": colors.get("background", "#1e1e2e"),
+                "surface": colors.get("surface", "#313244"),
+                "primary": colors.get("primary", "#cdd6f4"),
+                "secondary": colors.get("secondary", "#a6adc8"),
+                "border": colors.get("border", "#313244"),
+                "hover": colors.get("hover", "#45475a"),
+                "selected": colors.get("selected", "#45475a"),
+                "accent": colors.get("accent", "#89b4fa"),
+                "input_bg": colors.get("input_background", colors.get("surface", "#313244")),
+                "input_border": colors.get("input_border", colors.get("border", "#45475a")),
+            }
+    return {
+        "background": "#1e1e2e",
+        "surface": "#313244",
+        "primary": "#cdd6f4",
+        "secondary": "#a6adc8",
+        "border": "#313244",
+        "hover": "#45475a",
+        "selected": "#45475a",
+        "accent": "#89b4fa",
+        "input_bg": "#313244",
+        "input_border": "#45475a",
+    }
+
 DB_PATH = "bookmarks.db"
 
 # ─── Utilidades de iconos ─────────────────────────────────────────────────────
@@ -96,13 +138,11 @@ class AddBookmarkDialog(QDialog):
         btn_row.addWidget(save_btn)
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
-
     def _populate_folders(self, folders_manager, current_folder_id: int):
         """Rellena el combo con todas las carpetas (árbol aplanado con sangría)."""
         if folders_manager is None:
             self.folder_combo.addItem("📁 Marcadores", 1)
             return
-
         self.folder_combo.clear()
         selected_index = 0
 
@@ -114,22 +154,18 @@ class AddBookmarkDialog(QDialog):
                 if folder.id == current_folder_id:
                     selected_index = self.folder_combo.count() - 1
                 _add(folder.id, indent + "    ")
-
         # Primero la carpeta raíz
         self.folder_combo.addItem("📁 Marcadores (raíz)", 1)
         if current_folder_id == 1:
             selected_index = 0
         _add(1)
         self.folder_combo.setCurrentIndex(selected_index)
-
     @property
     def result_title(self) -> str:
         return self.title_edit.text().strip()
-
     @property
     def result_url(self) -> str:
         return self.url_edit.text().strip()
-
     @property
     def result_folder_id(self) -> int:
         return self.folder_combo.currentData() or 1
@@ -167,22 +203,18 @@ class MoveToCarpetaDialog(QDialog):
         btn_row.addWidget(ok_btn)
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
-
     def _populate(self, folders_manager, exclude_id: Optional[int]):
         if not folders_manager:
             self.combo.addItem("📁 Marcadores", 1)
             return
-
         def _add(parent_id: int, indent: str = ""):
             for f in folders_manager.get_children(parent_id):
                 if f.id == exclude_id:
                     continue
                 self.combo.addItem(f"{indent}📁 {f.name}", f.id)
                 _add(f.id, indent + "    ")
-
         self.combo.addItem("📁 Marcadores (raíz)", 1)
         _add(1)
-
     @property
     def selected_folder_id(self) -> int:
         return self.combo.currentData() or 1
@@ -222,8 +254,58 @@ class BookmarkPanelWidget(QWidget):
         self.bm = bookmark_manager    # instancia de BookmarkManager (maintag.py)
         self.fm = folders_manager     # instancia de FoldersManager
         self._build_ui()
+        self._apply_dynamic_styles()
         self.reload()
 
+        # Conectar al ThemeEngine para reaccionar a cambios de tema
+        if _THEME_AVAILABLE:
+            te = get_theme_engine()
+            if te:
+                te.theme_changed.connect(self._on_theme_changed)
+    def _on_theme_changed(self, _theme_name: str) -> None:
+        """Actualiza los estilos cuando cambia el tema global."""
+        self._apply_dynamic_styles()
+    def _apply_dynamic_styles(self) -> None:
+        """Aplica estilos al panel usando el ThemeEngine activo."""
+        c = _get_bookmark_theme_colors()
+        self._title_lbl.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {c['primary']}; padding: 4px 0;"
+        )
+        self._tree.setStyleSheet(f"""
+            QTreeWidget {{
+                background-color: {c['background']};
+                color: {c['primary']};
+                border: 1px solid {c['border']};
+                border-radius: 6px;
+                font-size: 13px;
+            }}
+            QTreeWidget::item {{
+                padding: 3px 2px;
+                border-radius: 4px;
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {c['hover']};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {c['selected']};
+                color: {c['primary']};
+            }}
+            QHeaderView::section {{
+                background-color: {c['surface']};
+                color: {c['secondary']};
+                border: none;
+                padding: 4px;
+            }}
+            QScrollBar:vertical {{
+                background: {c['background']};
+                width: 8px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {c['hover']};
+                border-radius: 4px;
+            }}
+        """)
     # ── Construcción de la UI ──────────────────────────────────────────────────
 
     def _build_ui(self):
@@ -232,11 +314,8 @@ class BookmarkPanelWidget(QWidget):
         root_layout.setSpacing(4)
 
         # — Título del panel —
-        title_lbl = QLabel("📖 Marcadores")
-        title_lbl.setStyleSheet(
-            "font-size: 14px; font-weight: bold; color: #cdd6f4; padding: 4px 0;"
-        )
-        root_layout.addWidget(title_lbl)
+        self._title_lbl = QLabel("📖 Marcadores")
+        root_layout.addWidget(self._title_lbl)
 
         # — Barra de búsqueda —
         self._search_edit = QLineEdit()
@@ -254,44 +333,7 @@ class BookmarkPanelWidget(QWidget):
         self._tree.itemDoubleClicked.connect(self._on_double_click)
         self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
-
-        self._tree.setStyleSheet("""
-            QTreeWidget {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-                border: 1px solid #313244;
-                border-radius: 6px;
-                font-size: 13px;
-            }
-            QTreeWidget::item {
-                padding: 3px 2px;
-                border-radius: 4px;
-            }
-            QTreeWidget::item:hover {
-                background-color: #313244;
-            }
-            QTreeWidget::item:selected {
-                background-color: #45475a;
-                color: #cdd6f4;
-            }
-            QHeaderView::section {
-                background-color: #181825;
-                color: #a6adc8;
-                border: none;
-                padding: 4px;
-            }
-            QScrollBar:vertical {
-                background: #181825;
-                width: 8px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #45475a;
-                border-radius: 4px;
-            }
-        """)
         root_layout.addWidget(self._tree)
-
     # ── Carga de datos ─────────────────────────────────────────────────────────
 
     def reload(self):
@@ -306,7 +348,6 @@ class BookmarkPanelWidget(QWidget):
             self._tree.resizeColumnToContents(0)
         except Exception as e:
             logger.error("Error recargando panel de marcadores: %s", e)
-
     def _add_node(self, parent_item: Optional[QTreeWidgetItem], node: dict):
         """Añade recursivamente carpetas y marcadores al árbol."""
         # Item de carpeta
@@ -314,7 +355,6 @@ class BookmarkPanelWidget(QWidget):
             folder_item = QTreeWidgetItem(self._tree)
         else:
             folder_item = QTreeWidgetItem(parent_item)
-
         folder_item.setText(0, f"📁 {node['name']}")
         folder_item.setData(0, self._ROLE_ID, node["id"])
         folder_item.setData(0, self._ROLE_TYPE, "folder")
@@ -323,7 +363,6 @@ class BookmarkPanelWidget(QWidget):
         # Subcarpetas
         for sub in node.get("children_folders", []):
             self._add_node(folder_item, sub)
-
         # Marcadores
         for bm in node.get("children_bookmarks", []):
             bm_item = QTreeWidgetItem(folder_item)
@@ -332,7 +371,6 @@ class BookmarkPanelWidget(QWidget):
             bm_item.setToolTip(1, bm["url"])
             bm_item.setData(0, self._ROLE_ID, bm["id"])
             bm_item.setData(0, self._ROLE_TYPE, "bookmark")
-
     # ── Búsqueda ──────────────────────────────────────────────────────────────
 
     def _on_search(self, text: str):
@@ -341,10 +379,8 @@ class BookmarkPanelWidget(QWidget):
         if not text:
             self.reload()
             return
-
         if not self.bm:
             return
-
         results = self.bm.search_bookmarks_text(text)
         self._tree.clear()
 
@@ -359,10 +395,8 @@ class BookmarkPanelWidget(QWidget):
             item.setToolTip(1, bm["url"])
             item.setData(0, self._ROLE_ID, bm["id"])
             item.setData(0, self._ROLE_TYPE, "bookmark")
-
         root.setExpanded(True)
         self._tree.resizeColumnToContents(0)
-
     # ── Acciones sobre carpetas ───────────────────────────────────────────────
 
     def _on_new_folder(self, parent_id: int = 1):
@@ -377,7 +411,6 @@ class BookmarkPanelWidget(QWidget):
                 self.data_changed.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"No se pudo crear la carpeta:\n{e}")
-
     def _create_subfolder(self, parent_id: int):
         name, ok = QInputDialog.getText(
             self, "Nueva subcarpeta", "Nombre:", QLineEdit.Normal, ""
@@ -389,7 +422,6 @@ class BookmarkPanelWidget(QWidget):
                 self.data_changed.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"No se pudo crear la subcarpeta:\n{e}")
-
     def _rename_folder(self, item: QTreeWidgetItem, folder_id: int):
         old = item.text(0).replace("📁 ", "")
         new_name, ok = QInputDialog.getText(
@@ -401,7 +433,6 @@ class BookmarkPanelWidget(QWidget):
                 self.data_changed.emit()
             else:
                 QMessageBox.critical(self, "Error", "No se pudo renombrar la carpeta")
-
     def _delete_folder(self, folder_id: int):
         reply = QMessageBox.question(
             self,
@@ -415,7 +446,6 @@ class BookmarkPanelWidget(QWidget):
                 self.data_changed.emit()
             else:
                 QMessageBox.critical(self, "Error", "No se pudo eliminar la carpeta")
-
     def _move_folder(self, folder_id: int):
         dlg = MoveToCarpetaDialog(self, self.fm, exclude_folder_id=folder_id)
         if dlg.exec():
@@ -425,7 +455,6 @@ class BookmarkPanelWidget(QWidget):
                 self.data_changed.emit()
             else:
                 QMessageBox.critical(self, "Error", "No se pudo mover la carpeta")
-
     def _folder_properties(self, folder_id: int):
         if not self.fm:
             return
@@ -441,7 +470,6 @@ class BookmarkPanelWidget(QWidget):
             f"Marcadores directos: {len(bms)}"
         )
         QMessageBox.information(self, "Propiedades", msg)
-
     # ── Acciones sobre marcadores ─────────────────────────────────────────────
 
     def _on_add_bookmark(self):
@@ -454,29 +482,24 @@ class BookmarkPanelWidget(QWidget):
             if tab:
                 url = tab.url().toString()
                 title = tab.page().title() if hasattr(tab, "page") else url
-
         dlg = AddBookmarkDialog(self, title=title, url=url, folders_manager=self.fm)
         if dlg.exec():
             if dlg.result_url and self.bm:
                 self.bm.add_bookmark_to_folder(dlg.result_url, dlg.result_title or dlg.result_url, dlg.result_folder_id)
                 self.reload()
                 self.data_changed.emit()
-
     def _open_bookmark(self, item: QTreeWidgetItem):
         url = item.text(1)
         if url:
             self.bookmark_opened.emit(url)
-
     def _open_in_new_tab(self, item: QTreeWidgetItem):
         url = item.text(1)
         if url:
             self.new_tab_requested.emit(url)
-
     def _copy_url(self, item: QTreeWidgetItem):
         url = item.text(1)
         if url:
             QApplication.clipboard().setText(url)
-
     def _move_bookmark(self, item: QTreeWidgetItem, bookmark_id: int):
         dlg = MoveToCarpetaDialog(self, self.fm)
         if dlg.exec():
@@ -485,7 +508,6 @@ class BookmarkPanelWidget(QWidget):
                 self.data_changed.emit()
             else:
                 QMessageBox.critical(self, "Error", "No se pudo mover el marcador")
-
     def _delete_bookmark(self, bookmark_id: int):
         reply = QMessageBox.question(
             self, "Eliminar marcador", "¿Eliminar este marcador?",
@@ -497,7 +519,6 @@ class BookmarkPanelWidget(QWidget):
                 self.data_changed.emit()
             else:
                 QMessageBox.critical(self, "Error", "No se pudo eliminar el marcador")
-
     # ── Exportar ──────────────────────────────────────────────────────────────
 
     def _on_export(self):
@@ -509,20 +530,17 @@ class BookmarkPanelWidget(QWidget):
                 QMessageBox.information(self, "Exportado", f"Marcadores exportados a:\n{path}")
             else:
                 QMessageBox.critical(self, "Error", "No se pudo exportar los marcadores")
-
     # ── Doble clic ────────────────────────────────────────────────────────────
 
     def _on_double_click(self, item: QTreeWidgetItem, _column: int):
         if item.data(0, self._ROLE_TYPE) == "bookmark":
             self._open_bookmark(item)
-
     # ── Menú contextual ───────────────────────────────────────────────────────
 
     def _on_context_menu(self, position):
         item = self._tree.itemAt(position)
         if not item:
             return
-
         item_type = item.data(0, self._ROLE_TYPE)
         item_id = item.data(0, self._ROLE_ID)
         menu = QMenu()
@@ -535,7 +553,6 @@ class BookmarkPanelWidget(QWidget):
                 menu.addSeparator()
             menu.addAction("📂 Nueva subcarpeta", lambda: self._create_subfolder(item_id or 1))
             menu.addAction("📊 Propiedades", lambda: self._folder_properties(item_id or 1))
-
         elif item_type == "bookmark":
             menu.addAction("🌐 Abrir", lambda: self._open_bookmark(item))
             menu.addAction("🗂️  Abrir en nueva pestaña", lambda: self._open_in_new_tab(item))
@@ -543,5 +560,4 @@ class BookmarkPanelWidget(QWidget):
             menu.addSeparator()
             menu.addAction("➡️  Mover a carpeta…", lambda: self._move_bookmark(item, item_id))
             menu.addAction("🗑️  Eliminar", lambda: self._delete_bookmark(item_id))
-
         menu.exec(self._tree.mapToGlobal(position))

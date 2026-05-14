@@ -14,26 +14,26 @@ from PySide6.QtCore import QSize
 
 class ComponentSize:
     """Tamaños estandarizados para componentes"""
-    
+
     # Botones
     BUTTON_SMALL = QSize(24, 24)
     BUTTON_MEDIUM = QSize(36, 36)
     BUTTON_LARGE = QSize(48, 48)
-    
+
     # Iconos
     ICON_SMALL = QSize(14, 14)
     ICON_MEDIUM = QSize(20, 20)
     ICON_LARGE = QSize(32, 32)
-    
+
     # Barras
     SIDEBAR_WIDTH = 36
     STATUSBAR_HEIGHT = 24
     NAVBAR_HEIGHT = 48
-    
+
     # URL Bar
     URLBAR_DEFAULT_WIDTH = 600
     URLBAR_EXPANDED_WIDTH = 800
-    
+
     # Tabs (estilo Chrome - extra compacto)
     TAB_HEIGHT = 12
     TAB_MIN_WIDTH = 100
@@ -85,10 +85,10 @@ class ThemeDefaults:
     DEFAULT_THEME = "light"
     THEME_DIRECTORY = "ui/themes"
     CUSTOM_THEME_DIRECTORY = "ui/themes/custom"
-    
+
     # Temas base disponibles
     BASE_THEMES = ["light", "dark"]
-    
+
     # Colores de fallback si un tema no tiene un valor
     FALLBACK_PRIMARY = "#000000"
     FALLBACK_BACKGROUND = "#ffffff"
@@ -129,4 +129,3 @@ def get_component_size(component: str, size: str = "MEDIUM") -> QSize:
 def get_animation_duration(speed: str = "NORMAL") -> int:
     """Obtener duración de animación por velocidad"""
     return getattr(Animation, speed.upper(), Animation.NORMAL)
-

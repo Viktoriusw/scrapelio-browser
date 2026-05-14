@@ -18,19 +18,18 @@ logger = logging.getLogger(__name__)
 
 class TokenEncryption:
     """Clase para cifrado seguro de tokens"""
-    
+
     def __init__(self):
         """Inicializa el sistema de cifrado"""
         self._key = None
         self._fernet = None
         self._initialize_encryption()
-    
     def _initialize_encryption(self):
         """Inicializa la clave de cifrado"""
         # Generar una clave única por máquina basada en identificadores del sistema
         machine_id = self._get_machine_id()
         salt = b'scrapelio_browser_salt_v1'  # Salt fijo para consistencia
-        
+
         # Derivar clave usando PBKDF2HMAC
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
@@ -39,10 +38,9 @@ class TokenEncryption:
             iterations=100000,
         )
         key = base64.urlsafe_b64encode(kdf.derive(machine_id.encode()))
-        
+
         self._key = key
         self._fernet = Fernet(key)
-    
     def _get_machine_id(self) -> str:
         """Obtiene un identificador único de la máquina"""
         try:
@@ -50,7 +48,6 @@ class TokenEncryption:
             if os.path.exists('/etc/machine-id'):
                 with open('/etc/machine-id', 'r') as f:
                     return f.read().strip()
-            
             # En Windows, usa una combinación de variables de entorno
             import platform
             machine_data = f"{platform.node()}_{platform.machine()}_{os.getenv('USERNAME', 'default')}"
@@ -59,13 +56,11 @@ class TokenEncryption:
             # Fallback: usar un hash del directorio home
             home = os.path.expanduser('~')
             return hashlib.sha256(home.encode()).hexdigest()
-    
     def encrypt(self, data: str) -> str:
         """Cifra datos sensibles y devuelve el token Fernet como string.
 
         Args:
             data: String a cifrar.
-
         Returns:
             Token cifrado Fernet (base64url) como str, o "" si falla.
         """
@@ -76,13 +71,11 @@ class TokenEncryption:
         except Exception as e:
             logger.error("Error cifrando datos: %s", e)
             return ""
-
     def decrypt(self, encrypted_data: str) -> str:
         """Descifra un token Fernet.
 
         Args:
             encrypted_data: Token Fernet como str (base64url).
-
         Returns:
             String descifrado, o "" si el token es inválido o está corrupto.
         """
@@ -94,12 +87,10 @@ class TokenEncryption:
             err_msg = repr(e) if not str(e) else str(e)
             logger.debug("Error descifrando datos (token inválido/expirado): %s", err_msg)
             return ""
-    
     # Alias para compatibilidad
     def encrypt_token(self, token: str) -> str:
         """Alias para encrypt() - compatibilidad con código existente"""
         return self.encrypt(token)
-    
     def decrypt_token(self, encrypted_token: str) -> str:
         """Alias para decrypt() - compatibilidad con código existente"""
         return self.decrypt(encrypted_token)

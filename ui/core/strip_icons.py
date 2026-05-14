@@ -66,20 +66,17 @@ def _svg_bytes_tinted(svg_text: str, color_hex: str) -> bytes:
 def _svg_bytes_tinted_v2(svg_text: str, color_hex: str) -> bytes:
     """
     Tinteado robusto de SVG. Cubre CUATRO casos que aparecen en SVGs reales:
-
     1. Atributos directos:  fill="#000000"  stroke="#000000"
     2. CSS inline en <style>: .st0{fill:#000000;}
     3. currentColor / inherited
     4. SVG sin fills explícitos (hereda negro por defecto de SVG)
        → se añade fill="COLOR" en el elemento <svg> raíz para que todos
          los paths lo hereden.
-
     En todos los casos se preserva fill="none" / fill="transparent".
     """
     c = (color_hex or "#A0A0A0").strip()
     if not c.startswith("#"):
         c = "#" + c
-
     # ── Paso 1: Reemplazar fills en bloques <style>...</style> ────────────────
     # Cubre:  .st0{fill:#000000;}  y variantes con espacios
     def _tint_style_block(match: re.Match) -> str:
@@ -109,7 +106,6 @@ def _svg_bytes_tinted_v2(svg_text: str, color_hex: str) -> bytes:
         css_body = css_body.replace("fill:__TRANSPARENT__", "fill:transparent")
 
         return f"<style{tag_attrs}>{css_body}</style>"
-
     out = re.sub(
         r"<style([^>]*)>(.*?)</style>",
         _tint_style_block,
@@ -165,7 +161,6 @@ def _svg_bytes_tinted_v2(svg_text: str, color_hex: str) -> bytes:
             count=1,
             flags=re.IGNORECASE,
         )
-
     # ── Paso 6: Restaurar protegidos ──────────────────────────────────────────
     out = out.replace('fill="__NONE__"',        'fill="none"')
     out = out.replace("fill='__NONE__'",        "fill='none'")
@@ -220,13 +215,11 @@ def build_strip_icon(resolved_path: str, color_hex: str, size: QSize) -> QIcon:
         resolved_path: Ruta absoluta al archivo de icono.
         color_hex:     Color deseado (p.ej. "#A0A0A0").
         size:          QSize de salida.
-
     Returns:
         QIcon con el color aplicado, o QIcon() si falla.
     """
     if not resolved_path or not os.path.isfile(resolved_path):
         return QIcon()
-
     ext = os.path.splitext(resolved_path)[1].lower()
     try:
         if ext == ".svg":
@@ -272,7 +265,6 @@ def resolve_icon_path(name: str, icons_dir: str | None = None) -> str:
     Args:
         name:      Nombre del icono sin extensión (p.ej. "back").
         icons_dir: Directorio de iconos. Si None, usa el directorio por defecto.
-
     Returns:
         Ruta absoluta al archivo, o cadena vacía si no existe.
     """
@@ -312,7 +304,6 @@ def build_nav_icon(
         color_hex: Color deseado. Si None, usa el color del tema activo.
         size:      Tamaño del icono. Si None, usa NAV_ICON_SIZE.
         icons_dir: Directorio de iconos. Si None, usa el directorio por defecto.
-
     Returns:
         QIcon con el color aplicado, o QIcon() si el archivo no existe.
     """
@@ -320,7 +311,6 @@ def build_nav_icon(
         color_hex = get_icon_color()
     if size is None:
         size = NAV_ICON_SIZE
-
     path = resolve_icon_path(name, icons_dir)
     if not path:
         return QIcon()
@@ -375,7 +365,6 @@ def build_nav_action(
         color_hex: Color del icono. Si None, usa el color del tema activo.
         size:      Tamaño del icono. Si None, usa NAV_ICON_SIZE.
         icons_dir: Directorio de iconos. Si None, usa el directorio por defecto.
-
     Returns:
         QAction con icono temático configurado.
     """
@@ -385,7 +374,6 @@ def build_nav_action(
         color_hex = get_icon_color()
     if size is None:
         size = NAV_ICON_SIZE
-
     path = resolve_icon_path(name, icons_dir)
     icon = build_strip_icon(path, color_hex, size) if path else QIcon()
 

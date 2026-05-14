@@ -41,7 +41,11 @@
     "icon_color": "#9AA0A6",
     "icon_button_background": "transparent",
     "icon_button_hover": "#45484A",
-    "glow_accent": "#8AB4F8"
+    "glow_accent": "#8AB4F8",
+    "navbar_button_background": "transparent",
+    "navbar_button_hover": "#45484A",
+    "navbar_button_pressed": "#5F6368",
+    "navbar_button_text": "#E8EAED"
   },
   "fonts": {
     "family": "Segoe UI, Arial, sans-serif",

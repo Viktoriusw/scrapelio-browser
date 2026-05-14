@@ -34,7 +34,6 @@ class BookmarksMigration:
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
         self.backup_path = f"{db_path}.backup"
-
     # ── API pública ────────────────────────────────────────────────────────────
 
     def backup(self) -> bool:
@@ -45,7 +44,6 @@ class BookmarksMigration:
         except OSError as e:
             logger.error("Error creando backup: %s", e)
             return False
-
     def restore(self) -> bool:
         try:
             shutil.copy2(self.backup_path, self.db_path)
@@ -54,7 +52,6 @@ class BookmarksMigration:
         except OSError as e:
             logger.error("Error restaurando backup: %s", e)
             return False
-
     def migrate(self) -> bool:
         """
         Ejecuta la migración completa.
@@ -66,7 +63,6 @@ class BookmarksMigration:
             logger.info("bookmarks.db no existe — creando BD nueva")
             self._create_new_database()
             return True
-
         self.backup()
         try:
             conn = sqlite3.connect(self.db_path)
@@ -88,7 +84,6 @@ class BookmarksMigration:
         except sqlite3.Error as e:
             logger.error("No se pudo conectar a la BD: %s", e)
             return False
-
     # ── Privados ───────────────────────────────────────────────────────────────
 
     def _create_new_database(self):
@@ -128,7 +123,6 @@ class BookmarksMigration:
         conn.commit()
         conn.close()
         logger.info("Nueva BD creada: %s", self.db_path)
-
     def _ensure_folders_table(self, conn: sqlite3.Connection):
         conn.execute("""
             CREATE TABLE IF NOT EXISTS bookmark_folders (
@@ -144,7 +138,6 @@ class BookmarksMigration:
             INSERT OR IGNORE INTO bookmark_folders (id, name, parent_id)
             VALUES (1, 'Marcadores', NULL)
         """)
-
     def _ensure_bookmark_columns(self, conn: sqlite3.Connection):
         cur = conn.execute("PRAGMA table_info(bookmarks)")
         existing = {row[1] for row in cur.fetchall()}
@@ -160,7 +153,6 @@ class BookmarksMigration:
             conn.execute(
                 "ALTER TABLE bookmarks ADD COLUMN date_added TEXT DEFAULT NULL"
             )
-
     def _migrate_categories_to_folders(self, conn: sqlite3.Connection):
         """
         Crea una subcarpeta en bookmark_folders por cada categoría de texto
@@ -187,7 +179,6 @@ class BookmarksMigration:
                 )
                 folder_id = cur2.lastrowid
                 logger.info("  Carpeta creada para categoría '%s' → id=%d", cat_name, folder_id)
-
             # Mover marcadores de esta categoría a la carpeta
             conn.execute(
                 "UPDATE bookmarks SET folder_id = ? WHERE category = ? AND (folder_id IS NULL OR folder_id = 1)",
@@ -207,10 +198,8 @@ class FolderInfo:
         self.name = name
         self.parent_id = parent_id
         self.position = position
-
     def __repr__(self) -> str:
         return f"Folder(id={self.id}, name={self.name!r}, parent={self.parent_id})"
-
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
@@ -237,7 +226,6 @@ class FoldersManager:
         self.db_path = db_path
         # Asegurarse de que la BD tiene la estructura mínima
         self._bootstrap()
-
     # ── Bootstrap ─────────────────────────────────────────────────────────────
 
     def _bootstrap(self):
@@ -258,14 +246,12 @@ class FoldersManager:
                 """)
         except sqlite3.Error as e:
             logger.error("FoldersManager bootstrap error: %s", e)
-
     # ── Conexión ──────────────────────────────────────────────────────────────
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
-
     # ── CRUD ──────────────────────────────────────────────────────────────────
 
     def create_folder(self, name: str, parent_id: Optional[int] = ROOT_ID) -> int:
@@ -280,7 +266,6 @@ class FoldersManager:
         name = (name or "").strip()
         if not name:
             raise ValueError("El nombre de la carpeta no puede estar vacío")
-
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(position), 0) FROM bookmark_folders WHERE parent_id = ?",
@@ -295,7 +280,6 @@ class FoldersManager:
             folder_id = cur.lastrowid
             logger.info("Carpeta creada: %r (id=%d, parent=%s)", name, folder_id, parent_id)
             return folder_id
-
     def delete_folder(self, folder_id: int, recursive: bool = True) -> bool:
         """
         Elimina una carpeta.  Si *recursive=True*, borra también todos sus
@@ -305,7 +289,6 @@ class FoldersManager:
         if folder_id == self.ROOT_ID:
             logger.error("No se puede eliminar la carpeta raíz")
             return False
-
         try:
             with self._conn() as conn:
                 if recursive:
@@ -316,14 +299,12 @@ class FoldersManager:
                         conn.execute("DELETE FROM bookmarks WHERE folder_id = ?", (fid,))
                     for fid in reversed(descendants):
                         conn.execute("DELETE FROM bookmark_folders WHERE id = ?", (fid,))
-
                 conn.execute("DELETE FROM bookmark_folders WHERE id = ?", (folder_id,))
                 logger.info("Carpeta %d eliminada (recursive=%s)", folder_id, recursive)
                 return True
         except sqlite3.Error as e:
             logger.error("Error eliminando carpeta %d: %s", folder_id, e)
             return False
-
     def rename_folder(self, folder_id: int, new_name: str) -> bool:
         """Renombra una carpeta."""
         new_name = (new_name or "").strip()
@@ -341,7 +322,6 @@ class FoldersManager:
         except sqlite3.Error as e:
             logger.error("Error renombrando carpeta %d: %s", folder_id, e)
             return False
-
     def move_folder(self, folder_id: int, new_parent_id: int) -> bool:
         """
         Mueve una carpeta a un nuevo padre.
@@ -367,7 +347,6 @@ class FoldersManager:
         except sqlite3.Error as e:
             logger.error("Error moviendo carpeta: %s", e)
             return False
-
     # ── Consultas ─────────────────────────────────────────────────────────────
 
     def get_folder(self, folder_id: int) -> Optional[FolderInfo]:
@@ -377,7 +356,6 @@ class FoldersManager:
                 (folder_id,),
             ).fetchone()
         return FolderInfo(row["id"], row["name"], row["parent_id"], row["position"]) if row else None
-
     def get_children(self, parent_id: int = ROOT_ID) -> List[FolderInfo]:
         """Devuelve las subcarpetas directas de *parent_id*, ordenadas por posición."""
         with self._conn() as conn:
@@ -387,7 +365,6 @@ class FoldersManager:
                 (parent_id,),
             ).fetchall()
         return [FolderInfo(r["id"], r["name"], r["parent_id"], r["position"]) for r in rows]
-
     def get_all_folders_flat(self) -> List[FolderInfo]:
         """Devuelve todas las carpetas en una lista plana ordenada por id."""
         with self._conn() as conn:
@@ -395,14 +372,12 @@ class FoldersManager:
                 "SELECT id, name, parent_id, position FROM bookmark_folders ORDER BY id"
             ).fetchall()
         return [FolderInfo(r["id"], r["name"], r["parent_id"], r["position"]) for r in rows]
-
     def get_hierarchy(self, parent_id: int = ROOT_ID) -> Dict:
         """
         Devuelve la estructura jerárquica completa desde *parent_id* como
         un dict anidado listo para construir un QTreeWidget.
 
         Formato::
-
             {
                 'id': 1,
                 'name': 'Marcadores',
@@ -423,7 +398,6 @@ class FoldersManager:
             ],
             "children_bookmarks": self._bookmarks_in_folder(parent_id),
         }
-
     def get_breadcrumb(self, folder_id: int) -> List[FolderInfo]:
         """
         Devuelve la ruta desde la raíz hasta *folder_id*.
@@ -438,7 +412,6 @@ class FoldersManager:
             crumbs.insert(0, folder)
             current_id = folder.parent_id
         return crumbs
-
     def print_tree(self, parent_id: int = ROOT_ID, indent: int = 0) -> str:
         """Representación textual del árbol (útil para depuración)."""
         lines: List[str] = []
@@ -450,7 +423,6 @@ class FoldersManager:
         for bm in self._bookmarks_in_folder(parent_id):
             lines.append("  " * (indent + 1) + f"🔖 {bm['title']}")
         return "\n".join(lines)
-
     # ── Helpers privados ──────────────────────────────────────────────────────
 
     def _bookmarks_in_folder(self, folder_id: int) -> List[Dict]:
@@ -465,7 +437,6 @@ class FoldersManager:
              "position": r["position"], "type": "bookmark"}
             for r in rows
         ]
-
     def _all_descendants(self, conn: sqlite3.Connection, folder_id: int) -> List[int]:
         """Devuelve todos los IDs de subcarpetas (recursivo) usando la conexión dada."""
         result: List[int] = []
@@ -477,7 +448,6 @@ class FoldersManager:
             result.append(child_id)
             result.extend(self._all_descendants(conn, child_id))
         return result
-
     def _is_descendant(self, ancestor_id: int, potential_descendant: int) -> bool:
         """True si *potential_descendant* está en el subárbol de *ancestor_id*."""
         for child in self.get_children(ancestor_id):

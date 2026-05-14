@@ -35,7 +35,6 @@ class AutocompleteItem:
         self.last_visit = last_visit
         self.icon = icon
         self.score = 0  # Score para ranking
-
     def calculate_score(self):
         """Calcular score para ranking de sugerencias"""
         score = 0
@@ -45,7 +44,6 @@ class AutocompleteItem:
             score += 100  # Marcadores tienen prioridad
         elif self.type == self.TYPE_HISTORY:
             score += 50
-
         # Bonus por frecuencia de visitas
         score += min(self.visit_count * 5, 200)  # Max 200 puntos por frecuencia
 
@@ -58,7 +56,6 @@ class AutocompleteItem:
                     score += 30 - (days_ago * 4)  # Más reciente = más score
             except:
                 pass
-
         self.score = score
         return score
 
@@ -68,7 +65,6 @@ class AutocompleteDelegate(QStyledItemDelegate):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-
     def paint(self, painter, option, index):
         """Renderizar item con estilo personalizado"""
         painter.save()
@@ -80,7 +76,6 @@ class AutocompleteDelegate(QStyledItemDelegate):
             painter.fillRect(option.rect, QColor("#f5f5f5"))
         else:
             painter.fillRect(option.rect, QColor("#ffffff"))
-
         # Obtener datos del item
         text = index.data(Qt.DisplayRole)
         url = index.data(Qt.UserRole)
@@ -98,7 +93,6 @@ class AutocompleteDelegate(QStyledItemDelegate):
             icon = "🔍"
         else:
             icon = "🌐"
-
         # Dibujar icono
         painter.setPen(QColor("#666"))
         painter.setFont(QFont("Segoe UI", 10))
@@ -121,7 +115,6 @@ class AutocompleteDelegate(QStyledItemDelegate):
         painter.drawText(url_rect, Qt.AlignLeft | Qt.AlignVCenter, url or text)
 
         painter.restore()
-
     def sizeHint(self, option, index):
         """Tamaño de cada item"""
         return option.rect.adjusted(0, 0, 0, 54).size()
@@ -185,7 +178,6 @@ class UrlAutocompleteSystem(QObject):
         # Cache de sugerencias
         self.suggestions_cache = []
         self.last_query = ""
-
     def eventFilter(self, obj, event):
         """Detectar clic en la barra para mostrar historial reciente."""
         if obj is self.url_bar:
@@ -197,7 +189,6 @@ class UrlAutocompleteSystem(QObject):
             elif event.type() == QEvent.FocusOut:
                 self._focus_was_from_mouse = False
         return super().eventFilter(obj, event)
-
     def _show_recent_on_focus(self):
         """Mostrar las URLs más recientes al hacer clic en la barra."""
         if not self.url_bar.hasFocus():
@@ -213,7 +204,6 @@ class UrlAutocompleteSystem(QObject):
             self.model.setData(idx, item.type, Qt.UserRole + 1)
             self.model.setData(idx, item.title, Qt.UserRole + 2)
         self.completer.complete()
-
     def _get_recent_history(self, limit=8):
         """Obtener las URLs visitadas más recientemente."""
         suggestions = []
@@ -239,7 +229,6 @@ class UrlAutocompleteSystem(QObject):
         except Exception:
             pass
         return suggestions
-
     def on_text_changed(self, text):
         """Manejar cambios en el texto de la barra de URL"""
         # CRITICO: Solo buscar sugerencias si la barra tiene el foco
@@ -247,30 +236,24 @@ class UrlAutocompleteSystem(QObject):
         if not self.url_bar.hasFocus():
             self.completer.popup().hide()
             return
-
         if len(text) < 2:
             self.completer.popup().hide()
             return
-
         # Reiniciar timer para búsqueda con delay
         self.search_timer.stop()
         self.search_timer.start(200)  # 200ms delay
-
     def update_suggestions(self):
         """Actualizar sugerencias de autocompletado"""
         # Verificación doble de foco (por si se perdió durante el delay)
         if not self.url_bar.hasFocus():
             return
-
         query = self.url_bar.text().strip().lower()
 
         if len(query) < 2:
             return
-
         # Evitar búsquedas duplicadas
         if query == self.last_query:
             return
-
         self.last_query = query
 
         # Buscar sugerencias
@@ -292,13 +275,11 @@ class UrlAutocompleteSystem(QObject):
             self.model.setData(index, suggestion.url, Qt.UserRole)
             self.model.setData(index, suggestion.type, Qt.UserRole + 1)
             self.model.setData(index, suggestion.title, Qt.UserRole + 2)
-
         # Mostrar popup si hay resultados
         if suggestions:
             self.completer.complete()
         else:
             self.completer.popup().hide()
-
     def get_suggestions(self, query):
         """Obtener sugerencias basadas en el query"""
         suggestions = []
@@ -311,7 +292,6 @@ class UrlAutocompleteSystem(QObject):
         if hasattr(self.parent_window, 'bookmark_manager'):
             bookmark_suggestions = self.search_bookmarks(query)
             suggestions.extend(bookmark_suggestions)
-
         # 3. Agregar sugerencia de búsqueda
         if len(query) > 0:
             search_item = AutocompleteItem(
@@ -323,13 +303,10 @@ class UrlAutocompleteSystem(QObject):
             )
             search_item.score = 10  # Baja prioridad
             suggestions.append(search_item)
-
         # Calcular scores
         for suggestion in suggestions:
             suggestion.calculate_score()
-
         return suggestions
-
     def search_history(self, query):
         """Buscar en el historial"""
         suggestions = []
@@ -355,15 +332,11 @@ class UrlAutocompleteSystem(QObject):
                             last_visit=timestamp.isoformat() if timestamp else None
                         )
                         suggestions.append(item)
-
                 # Limitar a 10 resultados más recientes
                 suggestions = suggestions[-10:]
-
         except Exception as e:
             print(f"[Autocomplete] Error searching history: {e}")
-
         return suggestions
-
     def search_bookmarks(self, query):
         """Buscar en marcadores"""
         suggestions = []
@@ -395,16 +368,12 @@ class UrlAutocompleteSystem(QObject):
                         visit_count=100  # Los marcadores tienen alta prioridad
                     )
                     suggestions.append(item)
-
         except Exception as e:
             print(f"[Autocomplete] Error searching bookmarks: {e}")
-
         return suggestions
-
     def on_suggestion_selected(self, text):
         """Manejar selección de sugerencia"""
         self.suggestion_selected.emit(text)
-
     def clear_cache(self):
         """Limpiar cache de sugerencias"""
         self.suggestions_cache = []

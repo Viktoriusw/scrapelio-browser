@@ -24,12 +24,12 @@ def check_dependency(module_name, package_name=None):
 def main():
     print("Verificando dependencias de Scrapelio Browser...")
     print("=" * 50)
-    
+
     dependencies = [
         # GUI Framework
         ("PySide6", "PySide6"),
         ("PyQt6", "PyQt6"),
-        
+
         # Web scraping
         ("requests", "requests"),
         ("bs4", "beautifulsoup4"),
@@ -38,42 +38,40 @@ def main():
         ("playwright", "playwright"),
         ("aiohttp", "aiohttp"),
         ("readability", "readability"),
-        
+
         # Data analysis
         ("pandas", "pandas"),
         ("numpy", "numpy"),
         ("openpyxl", "openpyxl"),
-        
+
         # Security
         ("jwt", "PyJWT"),
         ("cryptography", "cryptography"),
-        
+
         # Testing
         ("pytest", "pytest"),
         # ("pytest_qt", "pytest-qt"),  # Opcional, puede no estar disponible
-        
+
         # Scheduling
         ("schedule", "schedule"),
-        
+
         # Icons and themes
         ("qtawesome", "qtawesome"),
     ]
-    
+
     all_ok = True
-    
+
     for module, package in dependencies:
         if not check_dependency(module, package):
             all_ok = False
-    
     print("=" * 50)
-    
+
     if all_ok:
         print("🎉 ¡Todas las dependencias están instaladas correctamente!")
         print("Puedes ejecutar el programa con: python3 main.py")
     else:
         print("❌ Algunas dependencias faltan. Ejecuta:")
         print("python3 -m pip install --break-system-packages -r requirements.txt")
-    
     return all_ok
 
 if __name__ == "__main__":

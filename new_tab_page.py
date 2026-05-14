@@ -71,7 +71,6 @@ class ShortcutItem(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self._setup_ui(data, colors)
         self._apply_style(colors)
-
     def _setup_ui(self, data: dict, colors: dict):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 8, 4, 8)
@@ -90,7 +89,6 @@ class ShortcutItem(QWidget):
             "background: transparent; border: none;"
         )
         layout.addWidget(name_label)
-
     def _apply_style(self, c: dict):
         self.setStyleSheet(f"""
             QWidget#shortcut {{
@@ -103,7 +101,6 @@ class ShortcutItem(QWidget):
                 border-color: {c['border_strong']};
             }}
         """)
-
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.url:
             self.clicked_url.emit(self.url)
@@ -142,7 +139,6 @@ class AddShortcutItem(QWidget):
                 border-color: {colors['accent']};
             }}
         """)
-
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.add_clicked.emit()
@@ -217,7 +213,6 @@ class NewTabPage(QWidget):
 
         self._setup_ui()
         self._apply_style()
-
     # ── Construcción de la UI ──────────────────────────────────────────────────
 
     def _setup_ui(self):
@@ -255,7 +250,6 @@ class NewTabPage(QWidget):
         self._build_center()
 
         root.addStretch(2)
-
     def _build_center(self):
         layout = QVBoxLayout(self._center)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -348,28 +342,24 @@ class NewTabPage(QWidget):
 
         self._ai_widget.setVisible(self._show_ai)
         layout.addWidget(self._ai_widget)
-
     def _populate_shortcuts(self, grid: QGridLayout):
         """Rellena el grid con accesos directos (máx 6) + botón +."""
         for i in reversed(range(grid.count())):
             widget = grid.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
-
         items = self._shortcuts[:6]
         for idx, data in enumerate(items):
             row, col = divmod(idx, 3)
             item = ShortcutItem(data, self.colors)
             item.clicked_url.connect(self.navigate_requested.emit)
             grid.addWidget(item, row, col)
-
         # Botón "+" si hay espacio
         if len(items) < 6:
             row, col = divmod(len(items), 3)
             add_btn = AddShortcutItem(self.colors)
             add_btn.add_clicked.connect(self._add_shortcut_placeholder)
             grid.addWidget(add_btn, row, col)
-
     # ── Lógica ────────────────────────────────────────────────────────────────
 
     def _on_search(self):
@@ -384,18 +374,15 @@ class NewTabPage(QWidget):
             url = f"https://duckduckgo.com/?q={quote_plus(query)}"
         self._search.clear()
         self.navigate_requested.emit(url)
-
     def _open_settings(self):
         dlg = NewTabSettingsDialog(self._show_ai, self)
         if dlg.exec():
             self._show_ai = dlg.ai_check.isChecked()
             self.settings.setValue("show_ai", self._show_ai)
             self._ai_widget.setVisible(self._show_ai)
-
     def _add_shortcut_placeholder(self):
         """Placeholder: añadir acceso directo (extensible)."""
         _log.info("Nueva pestaña: añadir acceso directo (pendiente)")
-
     # ── Persistencia ──────────────────────────────────────────────────────────
 
     def _load_shortcuts(self) -> list:
@@ -405,13 +392,11 @@ class NewTabPage(QWidget):
             except Exception:
                 pass
         return list(_DEFAULT_SHORTCUTS)
-
     def _save_shortcuts(self):
         try:
             _SHORTCUTS_FILE.write_text(json.dumps(self._shortcuts, ensure_ascii=False, indent=2))
         except Exception as e:
             _log.error("No se pudieron guardar los accesos directos: %s", e)
-
     # ── Estilo global del widget ───────────────────────────────────────────────
 
     def _apply_style(self):
@@ -431,12 +416,10 @@ class NewTabPage(QWidget):
                 color: {self.colors['text_secondary']};
             }}
         """)
-
     def update_ai_suggestion(self, text: str):
         """Actualiza el texto de sugerencia IA desde fuera."""
         if hasattr(self, "_ai_text"):
             self._ai_text.setText(text[:120])
-
     def set_colors(self, colors: dict):
         """Permite cambiar la paleta de colores (para cambio de tema)."""
         self.colors = colors

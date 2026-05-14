@@ -3,8 +3,10 @@
 LLM Client - Abstracción unificada para proveedores LLM en Scrapelio Browser.
 
 Proveedores soportados:
-  - LM Studio  : servidor local OpenAI-compatible  (sin API key)
-  - llmapi.ai  : gateway cloud gratuito/premium     (requiere API key)
+  - LM Studio    : servidor local OpenAI-compatible  (sin API key)
+  - llmapi.ai    : gateway cloud gratuito/premium     (requiere API key)
+  - Anthropic    : API nativa Claude                  (requiere API key)
+  - HuggingFace  : Inference API / serverless         (requiere API key)
 
 API idéntica: LLMClient(config).chat(messages, max_tokens, temperature)
 """
@@ -21,13 +23,17 @@ logger = logging.getLogger(__name__)
 
 # ─── Constantes ────────────────────────────────────────────────────────────────
 
-PROVIDER_LOCAL = "local"          # LM Studio / Ollama / cualquier servidor local
-PROVIDER_LLMAPI = "llmapi"        # llmapi.ai
-PROVIDER_ANTHROPIC = "anthropic"  # API nativa de Anthropic
+PROVIDER_LOCAL = "local"              # LM Studio / Ollama / cualquier servidor local
+PROVIDER_LLMAPI = "llmapi"            # llmapi.ai
+PROVIDER_ANTHROPIC = "anthropic"      # API nativa de Anthropic
+PROVIDER_HUGGINGFACE = "huggingface"  # HuggingFace Inference API
 
 LLMAPI_BASE_URL = "https://api.llmapi.ai"
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 ANTHROPIC_API_VERSION = "2023-06-01"
+HUGGINGFACE_BASE_URL = "https://api-inference.huggingface.co"
+# Endpoint OpenAI-compatible (Serverless Inference — modelos de texto)
+HUGGINGFACE_ROUTER_URL = "https://router.huggingface.co/v1/chat/completions"
 
 # Modelos de Anthropic disponibles para el usuario
 ANTHROPIC_MODELS = [
@@ -46,6 +52,31 @@ ANTHROPIC_MODELS = [
 ]
 
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-5"
+
+# Modelos disponibles en HuggingFace Inference API (serverless)
+HUGGINGFACE_MODELS = [
+    # Meta Llama
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "meta-llama/Llama-3.1-8B-Instruct",
+    "meta-llama/Llama-3.2-3B-Instruct",
+    # Mistral / Mixtral
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1",
+    "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+    # Qwen
+    "Qwen/Qwen2.5-72B-Instruct",
+    "Qwen/Qwen2.5-Coder-32B-Instruct",
+    # DeepSeek
+    "deepseek-ai/DeepSeek-R1",
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+    # Google
+    "google/gemma-2-27b-it",
+    "google/gemma-2-9b-it",
+    # Microsoft
+    "microsoft/Phi-4-mini-instruct",
+]
+
+HUGGINGFACE_DEFAULT_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
 
 # Modelos gratuitos disponibles en llmapi.ai (para mostrar en la UI)
 LLMAPI_FREE_MODELS = [
@@ -71,6 +102,8 @@ class LLMConfig:
     llmapi_model: str = "gpt-4o-mini"
     anthropic_key: str = ""
     anthropic_model: str = ANTHROPIC_DEFAULT_MODEL
+    huggingface_key: str = ""
+    huggingface_model: str = HUGGINGFACE_DEFAULT_MODEL
     temperature: float = 0.7
     max_tokens: int = 4000
 
@@ -84,9 +117,10 @@ class LLMConfig:
         s.setValue("llmapi_model", self.llmapi_model)
         s.setValue("anthropic_key", self.anthropic_key)
         s.setValue("anthropic_model", self.anthropic_model)
+        s.setValue("huggingface_key", self.huggingface_key)
+        s.setValue("huggingface_model", self.huggingface_model)
         s.setValue("temperature", self.temperature)
         s.setValue("max_tokens", self.max_tokens)
-
     @classmethod
     def load(cls, namespace: str = "LLMClient") -> "LLMConfig":
         s = QSettings("Scrapelio", namespace)
@@ -97,6 +131,8 @@ class LLMConfig:
         cfg.llmapi_model = str(s.value("llmapi_model", "gpt-4o-mini"))
         cfg.anthropic_key = str(s.value("anthropic_key", ""))
         cfg.anthropic_model = str(s.value("anthropic_model", ANTHROPIC_DEFAULT_MODEL))
+        cfg.huggingface_key = str(s.value("huggingface_key", ""))
+        cfg.huggingface_model = str(s.value("huggingface_model", HUGGINGFACE_DEFAULT_MODEL))
         try:
             cfg.temperature = float(s.value("temperature", 0.7))
         except (TypeError, ValueError):
@@ -124,7 +160,6 @@ class LLMClient:
         self._session = requests.Session()
         # Caché del modelo local detectado (evita llamadas GET repetidas)
         self._cached_model_id: Optional[str] = None
-
     # ── API pública ───────────────────────────────────────────────────────────
 
     def chat(
@@ -144,8 +179,9 @@ class LLMClient:
             return self._chat_anthropic(messages, max_tokens, temp)
         if self.config.provider == PROVIDER_LLMAPI:
             return self._chat_llmapi(messages, max_tokens, temp)
+        if self.config.provider == PROVIDER_HUGGINGFACE:
+            return self._chat_huggingface(messages, max_tokens, temp)
         return self._chat_local(messages, max_tokens, temp)
-
     def chat_stream(
         self,
         messages: List[Dict],
@@ -161,7 +197,9 @@ class LLMClient:
         if self.config.provider == PROVIDER_ANTHROPIC:
             yield from self._stream_anthropic(messages, max_tokens, temp)
             return
-
+        if self.config.provider == PROVIDER_HUGGINGFACE:
+            yield from self._stream_huggingface(messages, max_tokens, temp)
+            return
         payload: Dict = {
             "messages": messages,
             "temperature": temp,
@@ -169,7 +207,6 @@ class LLMClient:
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-
         if self.config.provider == PROVIDER_LLMAPI:
             if not self.config.llmapi_key:
                 raise LLMError("API key de llmapi.ai no configurada")
@@ -182,12 +219,10 @@ class LLMClient:
             if model_id:
                 payload["model"] = model_id
             headers = self.get_headers()
-
         resp = self._session.post(url, json=payload, headers=headers,
                                   stream=True, timeout=180)
         if resp.status_code != 200:
             raise LLMError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-
         for raw_line in resp.iter_lines():
             if not raw_line:
                 continue
@@ -204,7 +239,6 @@ class LLMClient:
                     yield delta
             except (json.JSONDecodeError, KeyError, IndexError):
                 continue
-
     def test(self) -> tuple:
         """Prueba la conexión. Devuelve (ok: bool, mensaje: str)."""
         try:
@@ -212,10 +246,11 @@ class LLMClient:
                 return self._test_anthropic()
             if self.config.provider == PROVIDER_LLMAPI:
                 return self._test_llmapi()
+            if self.config.provider == PROVIDER_HUGGINGFACE:
+                return self._test_huggingface()
             return self._test_local()
         except Exception as e:
             return False, str(e)
-
     def list_models(self) -> List[str]:
         """Lista modelos disponibles (solo para el proveedor activo)."""
         try:
@@ -223,17 +258,19 @@ class LLMClient:
                 return ANTHROPIC_MODELS
             if self.config.provider == PROVIDER_LLMAPI:
                 return LLMAPI_FREE_MODELS
+            if self.config.provider == PROVIDER_HUGGINGFACE:
+                return HUGGINGFACE_MODELS
             return self._list_models_local()
         except Exception:
             return []
-
     def get_base_url(self) -> str:
         if self.config.provider == PROVIDER_ANTHROPIC:
             return ANTHROPIC_BASE_URL
         if self.config.provider == PROVIDER_LLMAPI:
             return LLMAPI_BASE_URL
+        if self.config.provider == PROVIDER_HUGGINGFACE:
+            return HUGGINGFACE_ROUTER_URL
         return self.config.local_url.rstrip("/")
-
     def get_headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if self.config.provider == PROVIDER_ANTHROPIC and self.config.anthropic_key:
@@ -241,8 +278,9 @@ class LLMClient:
             headers["anthropic-version"] = ANTHROPIC_API_VERSION
         elif self.config.provider == PROVIDER_LLMAPI and self.config.llmapi_key:
             headers["Authorization"] = f"Bearer {self.config.llmapi_key}"
+        elif self.config.provider == PROVIDER_HUGGINGFACE and self.config.huggingface_key:
+            headers["Authorization"] = f"Bearer {self.config.huggingface_key}"
         return headers
-
     # ── Implementaciones locales ──────────────────────────────────────────────
 
     def _chat_local(self, messages, max_tokens, temperature) -> str:
@@ -257,10 +295,8 @@ class LLMClient:
             payload["max_tokens"] = max_tokens
         if model_id:
             payload["model"] = model_id
-
         resp = self._session.post(url, json=payload, headers=self.get_headers(), timeout=120)
         return self._parse_response(resp)
-
     def _test_local(self) -> tuple:
         url = f"{self.config.local_url.rstrip('/')}/v1/models"
         resp = self._session.get(url, timeout=8)
@@ -270,14 +306,12 @@ class LLMClient:
         if not models:
             return False, "Servidor responde pero sin modelos cargados"
         return True, f"Conectado — modelo: {models[0].get('id', '?')}"
-
     def _list_models_local(self) -> List[str]:
         url = f"{self.config.local_url.rstrip('/')}/v1/models"
         resp = self._session.get(url, timeout=8)
         if resp.status_code != 200:
             return []
         return [m.get("id", "") for m in resp.json().get("data", []) if m.get("id")]
-
     def _detect_local_model(self) -> str:
         """Devuelve el primer modelo disponible, usando caché para evitar GETs repetidos."""
         if self._cached_model_id is not None:
@@ -294,13 +328,14 @@ class LLMClient:
             pass
         self._cached_model_id = ""
         return ""
-
     def detect_context_window(self) -> int:
         """Detecta ventana de contexto del modelo local; fallback seguro 4096."""
         if self.config.provider == PROVIDER_ANTHROPIC:
             return 200000  # Todos los modelos Claude tienen 200k ctx
         if self.config.provider == PROVIDER_LLMAPI:
             return 32000  # los modelos cloud tienen contexto amplio
+        if self.config.provider == PROVIDER_HUGGINGFACE:
+            return 32000  # ventana conservadora para modelos HuggingFace
         try:
             url = f"{self.config.local_url.rstrip('/')}/v1/models"
             resp = self._session.get(url, timeout=6)
@@ -322,7 +357,6 @@ class LLMClient:
         except Exception:
             pass
         return 4096
-
     # ── Implementaciones llmapi.ai ────────────────────────────────────────────
 
     def _chat_llmapi(self, messages, max_tokens, temperature) -> str:
@@ -339,7 +373,6 @@ class LLMClient:
             payload["max_tokens"] = max_tokens
         resp = self._session.post(url, json=payload, headers=self.get_headers(), timeout=120)
         return self._parse_response(resp)
-
     def _test_llmapi(self) -> tuple:
         if not self.config.llmapi_key:
             return False, "API key vacía — introduce tu clave de llmapi.ai"
@@ -361,7 +394,6 @@ class LLMClient:
         except Exception:
             err = resp.text[:200]
         return False, f"HTTP {resp.status_code}: {err}"
-
     # ── Implementaciones Anthropic ────────────────────────────────────────────
 
     def _build_anthropic_payload(
@@ -386,7 +418,6 @@ class LLMClient:
                 system_prompt = content
             elif role in ("user", "assistant"):
                 anthropic_messages.append({"role": role, "content": content})
-
         payload: Dict = {
             "model": self.config.anthropic_model,
             "messages": anthropic_messages,
@@ -396,14 +427,11 @@ class LLMClient:
         }
         if system_prompt:
             payload["system"] = system_prompt
-
         return payload
-
     def _chat_anthropic(self, messages: List[Dict], max_tokens: Optional[int], temperature: float) -> str:
         """Llamada síncrona a la API de Anthropic."""
         if not self.config.anthropic_key:
             raise LLMError("API key de Anthropic no configurada")
-
         url = f"{ANTHROPIC_BASE_URL}/v1/messages"
         payload = self._build_anthropic_payload(messages, max_tokens, temperature, stream=False)
 
@@ -417,13 +445,11 @@ class LLMClient:
             except Exception:
                 detail = resp.text[:400]
             raise LLMError(f"Anthropic API error {resp.status_code}: {detail}")
-
         data = resp.json()
         content_blocks = data.get("content", [])
         if not content_blocks:
             raise LLMError("Respuesta vacía de Anthropic")
         return "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
-
     def _stream_anthropic(
         self,
         messages: List[Dict],
@@ -438,7 +464,6 @@ class LLMClient:
         """
         if not self.config.anthropic_key:
             raise LLMError("API key de Anthropic no configurada")
-
         url = f"{ANTHROPIC_BASE_URL}/v1/messages"
         payload = self._build_anthropic_payload(messages, max_tokens, temperature, stream=True)
 
@@ -454,7 +479,6 @@ class LLMClient:
             except Exception:
                 detail = resp.text[:200]
             raise LLMError(f"Anthropic stream error {resp.status_code}: {detail}")
-
         current_event = None
         for raw_line in resp.iter_lines():
             if not raw_line:
@@ -464,7 +488,6 @@ class LLMClient:
             if line.startswith("event: "):
                 current_event = line[7:].strip()
                 continue
-
             if line.startswith("data: "):
                 data_str = line[6:].strip()
                 if data_str == "[DONE]" or current_event == "message_stop":
@@ -480,7 +503,6 @@ class LLMClient:
                             yield text
                 except (json.JSONDecodeError, KeyError):
                     continue
-
     def _test_anthropic(self) -> tuple:
         """Prueba la conexión con Anthropic enviando un mensaje mínimo."""
         if not self.config.anthropic_key:
@@ -510,7 +532,106 @@ class LLMClient:
             return False, "Timeout — la API de Anthropic no respondió en 20s"
         except Exception as e:
             return False, str(e)
+    # ── Implementaciones HuggingFace ──────────────────────────────────────────
 
+    def _chat_huggingface(self, messages: List[Dict], max_tokens: Optional[int], temperature: float) -> str:
+        """
+        Llamada síncrona al endpoint OpenAI-compatible de HuggingFace Inference API.
+        Usa el router serverless de HuggingFace que admite el formato messages estándar.
+        """
+        if not self.config.huggingface_key:
+            raise LLMError("API key de HuggingFace no configurada")
+        payload: Dict = {
+            "model": self.config.huggingface_model,
+            "messages": messages,
+            "temperature": max(0.01, temperature),  # HF no acepta temperature=0
+            "stream": False,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        resp = self._session.post(
+            HUGGINGFACE_ROUTER_URL,
+            json=payload,
+            headers=self.get_headers(),
+            timeout=120,
+        )
+        return self._parse_response(resp)
+    def _stream_huggingface(
+        self,
+        messages: List[Dict],
+        max_tokens: Optional[int],
+        temperature: float,
+    ) -> Iterator[str]:
+        """
+        Streaming SSE desde HuggingFace Inference Router (formato OpenAI-compatible).
+        """
+        if not self.config.huggingface_key:
+            raise LLMError("API key de HuggingFace no configurada")
+        payload: Dict = {
+            "model": self.config.huggingface_model,
+            "messages": messages,
+            "temperature": max(0.01, temperature),
+            "stream": True,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        resp = self._session.post(
+            HUGGINGFACE_ROUTER_URL,
+            json=payload,
+            headers=self.get_headers(),
+            stream=True,
+            timeout=180,
+        )
+        if resp.status_code != 200:
+            raise LLMError(f"HuggingFace HTTP {resp.status_code}: {resp.text[:200]}")
+        for raw_line in resp.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            if not line.startswith("data: "):
+                continue
+            data = line[6:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                obj = json.loads(data)
+                delta = obj["choices"][0]["delta"].get("content", "")
+                if delta:
+                    yield delta
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
+    def _test_huggingface(self) -> tuple:
+        """Prueba la conexión con HuggingFace enviando un mensaje mínimo."""
+        if not self.config.huggingface_key:
+            return False, "API key vacía — introduce tu token HuggingFace (hf_...)"
+        try:
+            resp = self._session.post(
+                HUGGINGFACE_ROUTER_URL,
+                json={
+                    "model": self.config.huggingface_model,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 10,
+                    "stream": False,
+                },
+                headers=self.get_headers(),
+                timeout=25,
+            )
+            if resp.status_code == 200:
+                return True, f"Conectado a HuggingFace — modelo: {self.config.huggingface_model}"
+            try:
+                err_body = resp.json()
+                err = err_body.get("error", resp.text[:200])
+                if isinstance(err, dict):
+                    err = err.get("message", str(err))
+            except Exception:
+                err = resp.text[:200]
+            return False, f"HTTP {resp.status_code}: {err}"
+        except requests.exceptions.ConnectionError:
+            return False, "Sin conexión a router.huggingface.co — verifica tu red"
+        except requests.exceptions.Timeout:
+            return False, "Timeout — HuggingFace no respondió en 25s (modelo frío)"
+        except Exception as e:
+            return False, str(e)
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod

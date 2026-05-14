@@ -23,8 +23,8 @@
       },
       "permissions": ["web_access", "file_system", "data_export"],
       "icon": "scraping_icon.png",
-      "download_url": "http://192.168.1.175:8000/api/plugins/scraping/download",
-      "info_url": "http://192.168.1.175:8000/api/plugins/scraping/info"
+      "download_url": "http://74.208.93.181:8000/api/plugins/scraping/download",
+      "info_url": "http://74.208.93.181:8000/api/plugins/scraping/info"
     },
     "proxy": {
       "name": "Proxy Management",
@@ -47,8 +47,8 @@
       },
       "permissions": ["network_access", "proxy_configuration"],
       "icon": "proxy_icon.png",
-      "download_url": "http://192.168.1.175:8000/api/plugins/proxy/download",
-      "info_url": "http://192.168.1.175:8000/api/plugins/proxy/info"
+      "download_url": "http://74.208.93.181:8000/api/plugins/proxy/download",
+      "info_url": "http://74.208.93.181:8000/api/plugins/proxy/info"
     },
     "tor": {
       "name": "Tor Network",
@@ -88,8 +88,8 @@
       },
       "permissions": ["ui_customization", "file_system"],
       "icon": "themes_icon.png",
-      "download_url": "http://192.168.1.175:8000/api/plugins/themes/download",
-      "info_url": "http://192.168.1.175:8000/api/plugins/themes/info"
+      "download_url": "http://74.208.93.181:8000/api/plugins/themes/download",
+      "info_url": "http://74.208.93.181:8000/api/plugins/themes/info"
     }
   },
   "categories": [

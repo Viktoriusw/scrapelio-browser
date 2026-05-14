@@ -26,7 +26,8 @@ from PySide6.QtGui import QFont, QColor, QTextCursor
 from base_panel import BasePanel
 from llm_client import (
     LLMClient, LLMConfig, LLMError,
-    PROVIDER_LOCAL, PROVIDER_LLMAPI, PROVIDER_ANTHROPIC,
+    PROVIDER_LOCAL, PROVIDER_LLMAPI, PROVIDER_ANTHROPIC, PROVIDER_HUGGINGFACE,
+    HUGGINGFACE_MODELS, HUGGINGFACE_DEFAULT_MODEL,
     LLMAPI_FREE_MODELS, ANTHROPIC_MODELS, ANTHROPIC_DEFAULT_MODEL,
 )
 
@@ -37,6 +38,13 @@ try:
     _AI_NAV_OK = True
 except ImportError:
     _AI_NAV_OK = False
+
+# Helio: importación de nivel 2 (solo detector de intención, sin chromadb/embeddings)
+try:
+    from session_intent_detector import IntentDetector as _HelioIntentDetector
+    _HELIO_INTENT_OK = True
+except ImportError:
+    _HELIO_INTENT_OK = False
 
 SYSTEM_PROMPT_BROWSER = """You are the AI copilot of a modern web browser. You help the user navigate, search and discover content.
 
@@ -73,10 +81,8 @@ class ChatWorker(QThread):
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._cancelled = False
-
     def cancel(self):
         self._cancelled = True
-
     def run(self):
         try:
             client = LLMClient(self._llm_config)
@@ -114,25 +120,11 @@ class ChatWorker(QThread):
 
 
 class ChatPanelSafe(BasePanel):
-
     # Señal para solicitar apertura de GenTab desde dentro del panel
     gentab_requested = Signal(str)
 
-    # Paleta de colores del panel
-    _C = {
-        "surface_0":      "#1A1A1A",
-        "surface_1":      "#222222",
-        "surface_hover":  "#303030",
-        "border":         "rgba(255,255,255,0.08)",
-        "text_primary":   "#F0F0F0",
-        "text_secondary": "#A0A0A0",
-        "text_muted":     "#606060",
-        "accent":         "#4B9EFF",
-        "accent_subtle":  "rgba(75,158,255,0.12)",
-        "error":          "#F85149",
-        "error_subtle":   "rgba(248,81,73,0.08)",
-        "success":        "#3FB950",
-    }
+    # _C se construye dinámicamente desde ThemeEngine en _build_color_palette()
+    _C: dict = {}
 
     def __init__(self, parent=None):
         self.chat_history = []
@@ -145,8 +137,95 @@ class ChatPanelSafe(BasePanel):
         self._last_session_analysis = {}
         self._chat_worker: "ChatWorker | None" = None
         self._streaming_placeholder_added = False
+
+        # ── Helio: estado interno ──
+        self._helio_last_url: str = ""
+        self._helio_last_time: float = 0.0
+        self._helio_suggestions_container = None
+        self._helio_suggestion_frames: list = []
+        self._helio_refresh_timer: "QTimer | None" = None
+
+        # Inicializar _C antes de super().__init__ porque los métodos
+        # create_*_tab() se invocan durante setup_ui() dentro del constructor base.
+        # En este punto ThemeEngine ya está activo, pero como fallback usamos
+        # los tokens oscuros por defecto definidos en base_panel.
+        try:
+            from ui.core.theme_engine import get_theme_engine as _gte
+            _te = _gte()
+            if _te:
+                _data = _te.get_theme_data()
+                _colors = _data.get("colors", {})
+                import re as _re2
+                def _rxa(h, a):
+                    m = _re2.match(r"#([0-9a-fA-F]{6})", h)
+                    if m:
+                        rv, gv, bv = int(m.group(1)[:2],16), int(m.group(1)[2:4],16), int(m.group(1)[4:],16)
+                        return f"rgba({rv},{gv},{bv},{a})"
+                    return h
+                _bg = _colors.get("background", "#1A1A1A")
+                _sf = _colors.get("surface", "#222222")
+                _pr = _colors.get("primary", "#F0F0F0")
+                _se = _colors.get("secondary", "#A0A0A0")
+                _ac = _colors.get("accent", "#4B9EFF")
+                _bo = _colors.get("border", "rgba(255,255,255,0.08)")
+                _ho = _colors.get("hover", "#303030")
+                _er = _colors.get("error", "#F85149")
+                _su = _colors.get("success", "#3FB950")
+                self._C = {
+                    "surface_0": _bg, "surface_1": _sf, "surface_hover": _ho,
+                    "border": _bo, "text_primary": _pr, "text_secondary": _se,
+                    "text_muted": _colors.get("text_disabled", _se),
+                    "accent": _ac, "accent_subtle": _rxa(_ac, 0.12),
+                    "error": _er, "error_subtle": _rxa(_er, 0.08),
+                    "success": _su,
+                    "input_bg": _colors.get("input_background", _sf),
+                    "input_border": _colors.get("input_border", _bo),
+                    "input_focus": _colors.get("input_focus", _ac),
+                    "selected": _colors.get("selected", "#303030"),
+                    "scroll_handle": _rxa(_pr, 0.15),
+                    "scroll_handle_hover": _rxa(_pr, 0.30),
+                    "warning": _colors.get("warning", "#D29922"),
+                }
+            else:
+                raise RuntimeError("no engine")
+        except Exception:
+            self._C = {
+                "surface_0": "#1A1A1A", "surface_1": "#222222", "surface_hover": "#303030",
+                "border": "rgba(255,255,255,0.08)", "text_primary": "#F0F0F0",
+                "text_secondary": "#A0A0A0", "text_muted": "#606060",
+                "accent": "#4B9EFF", "accent_subtle": "rgba(75,158,255,0.12)",
+                "error": "#F85149", "error_subtle": "rgba(248,81,73,0.08)",
+                "success": "#3FB950", "warning": "#D29922",
+                "input_bg": "#222222", "input_border": "rgba(255,255,255,0.08)",
+                "input_focus": "#4B9EFF", "selected": "#303030",
+                "scroll_handle": "rgba(255,255,255,0.12)",
+                "scroll_handle_hover": "rgba(255,255,255,0.25)",
+            }
         super().__init__(parent)
 
+        # Helio: conectar auto-contexto tras construir la UI
+        QTimer.singleShot(2000, self._helio_connect_auto_context)
+    def _build_color_palette(self) -> dict:
+        """Construye la paleta _C leyendo el ThemeEngine activo.
+        Si el ThemeEngine no está disponible, devuelve self._C existente o el fallback."""
+        try:
+            c = self.get_theme_colors()
+            if c:
+                return c
+        except Exception:
+            pass
+        return self._C if self._C else {
+            "surface_0": "#1A1A1A", "surface_1": "#222222", "surface_hover": "#303030",
+            "border": "rgba(255,255,255,0.08)", "text_primary": "#F0F0F0",
+            "text_secondary": "#A0A0A0", "text_muted": "#606060",
+            "accent": "#4B9EFF", "accent_subtle": "rgba(75,158,255,0.12)",
+            "error": "#F85149", "error_subtle": "rgba(248,81,73,0.08)",
+            "success": "#3FB950", "warning": "#D29922",
+            "input_bg": "#222222", "input_border": "rgba(255,255,255,0.08)",
+            "input_focus": "#4B9EFF", "selected": "#303030",
+            "scroll_handle": "rgba(255,255,255,0.12)",
+            "scroll_handle_hover": "rgba(255,255,255,0.25)",
+        }
     def get_tab_definitions(self):
         return [
             (self.create_chat_tab,       "💬 Chat"),
@@ -155,13 +234,17 @@ class ChatPanelSafe(BasePanel):
             (self.create_history_tab,    "📚 Historial"),
             (self.create_help_tab,       "❓ Ayuda"),
         ]
-
     def post_setup_ui(self):
         self.set_object_name("chatPanel")
         self._apply_chat_style()
-
+    def _on_theme_changed(self, theme_name):
+        """Recarga estilos del chat cuando cambia el tema global."""
+        super()._on_theme_changed(theme_name)
+        self._C = self._build_color_palette()
+        self._apply_chat_style()
     def _apply_chat_style(self):
-        """Aplica el sistema de diseño Arc/Linear al panel de chat."""
+        """Aplica el sistema de diseño al panel de chat usando el tema activo."""
+        self._C = self._build_color_palette()
         c = self._C
         self.setStyleSheet(f"""
             QWidget#chatPanel, QWidget {{
@@ -302,7 +385,352 @@ class ChatPanelSafe(BasePanel):
                 border-radius: 3px;
             }}
         """)
+    # ── Helio: Auto-contexto continuo (Mejora 1) ────────────────────────────
 
+    def _helio_connect_auto_context(self) -> None:
+        """Conecta señales del navegador para actualizar contexto automáticamente."""
+        try:
+            main = self.window()
+            if not hasattr(main, "tab_manager"):
+                return
+            tm = main.tab_manager
+            # Conectar cambio de pestaña
+            tm.tabs.currentChanged.connect(self._helio_on_tab_changed)
+            # Conectar loadFinished de pestañas existentes
+            for i in range(tm.tabs.count()):
+                browser = tm.tabs.widget(i)
+                if browser and hasattr(browser, "loadFinished"):
+                    try:
+                        browser.loadFinished.connect(self._helio_on_page_loaded)
+                    except Exception:
+                        pass
+            # Timer de debounce para sugerencias Helio (Mejora 5)
+            self._helio_refresh_timer = QTimer(self)
+            self._helio_refresh_timer.setSingleShot(True)
+            self._helio_refresh_timer.setInterval(10000)
+            self._helio_refresh_timer.timeout.connect(self._helio_refresh_suggestions)
+            _chat_log.info("Helio: auto-context connected")
+        except Exception as e:
+            _chat_log.debug("Helio: auto-context connection failed: %s", e)
+    def _helio_on_tab_changed(self, index: int) -> None:
+        """Cuando cambia la pestaña activa, extrae contexto automáticamente."""
+        try:
+            main = self.window()
+            if not hasattr(main, "tab_manager"):
+                return
+            browser = main.tab_manager.tabs.widget(index)
+            if browser and hasattr(browser, "url"):
+                url = browser.url().toString()
+                if url and not url.startswith("about:"):
+                    self._helio_extract_and_update(browser)
+            # Conectar loadFinished si no estaba conectado
+            if browser and hasattr(browser, "loadFinished"):
+                try:
+                    browser.loadFinished.connect(self._helio_on_page_loaded)
+                except Exception:
+                    pass  # ya conectado
+            # Programar refresco de sugerencias
+            if self._helio_refresh_timer:
+                self._helio_refresh_timer.start()
+        except Exception as e:
+            _chat_log.debug("Helio: tab change handler error: %s", e)
+    def _helio_on_page_loaded(self, ok: bool) -> None:
+        """Cuando una página termina de cargar, extrae contexto."""
+        if not ok:
+            return
+        try:
+            main = self.window()
+            if not hasattr(main, "tab_manager"):
+                return
+            browser = main.tab_manager.tabs.currentWidget()
+            if browser and hasattr(browser, "url"):
+                self._helio_extract_and_update(browser)
+            # Programar refresco de sugerencias
+            if self._helio_refresh_timer:
+                self._helio_refresh_timer.start()
+        except Exception as e:
+            _chat_log.debug("Helio: page loaded handler error: %s", e)
+    def _helio_extract_and_update(self, browser) -> None:
+        """Extrae contenido de la pestaña y actualiza el contexto del chat."""
+        try:
+            url = browser.url().toString()
+            if not url or url.startswith("about:"):
+                return
+            # Throttle: no re-extraer si misma URL en últimos 5 segundos
+            now = time.time()
+            if url == self._helio_last_url and (now - self._helio_last_time) < 5.0:
+                return
+            self._helio_last_url = url
+            self._helio_last_time = now
+
+            title = ""
+            if hasattr(browser, "page") and browser.page():
+                title = browser.page().title() or ""
+            def _on_html(html):
+                try:
+                    extracted = self._simple_extract_text(html, url, title)
+                    if hasattr(self, "context_display"):
+                        self.context_display.setPlainText(extracted)
+                    _chat_log.debug("Helio: auto-extracted %d chars from %s", len(extracted), url[:60])
+                except Exception as e:
+                    _chat_log.debug("Helio: extraction callback error: %s", e)
+            if hasattr(browser, "page") and browser.page():
+                browser.page().toHtml(_on_html)
+        except Exception as e:
+            _chat_log.debug("Helio: extract_and_update error: %s", e)
+    # ── Helio: Guard con fallback de 3 niveles (Mejora 2) ─────────────────
+
+    def _helio_detect_intent_level(self) -> int:
+        """Detecta el nivel de funcionalidad IA disponible.
+
+        Returns:
+            1 = completo (_AI_NAV_OK + ai_nav_enabled en MainWindow)
+            2 = ligero (IntentDetector disponible, sin chromadb)
+            3 = básico (heurísticas simples, siempre disponible)
+        """
+        try:
+            if _AI_NAV_OK:
+                main = self.window()
+                if hasattr(main, "ai_nav_enabled") and main.ai_nav_enabled:
+                    return 1
+        except Exception:
+            pass
+        if _HELIO_INTENT_OK:
+            return 2
+        return 3
+    def _helio_basic_intent(self) -> dict:
+        """Detección de intención básica por heurísticas de dominio (nivel 3)."""
+        result = {"intent": "general", "confidence": 0.3, "source": "helio_basic",
+                  "suggested_action": "Explora más pestañas para un análisis completo"}
+        try:
+            main = self.window()
+            if not hasattr(main, "tab_manager"):
+                return result
+            browser = main.tab_manager.tabs.currentWidget()
+            if not browser or not hasattr(browser, "url"):
+                return result
+            url = browser.url().toString().lower()
+            domain = urlparse(url).netloc.lower() if url else ""
+
+            _PATTERNS = {
+                "shopping": ["amazon", "ebay", "aliexpress", "mercadolibre", "etsy", "shopify", "tienda"],
+                "news": ["bbc", "cnn", "reuters", "elpais", "elmundo", "nytimes", "news"],
+                "coding": ["github", "stackoverflow", "gitlab", "codepen", "dev.to", "docs.python"],
+                "research": ["scholar.google", "arxiv", "wikipedia", "pubmed", "researchgate"],
+                "travel": ["booking", "airbnb", "tripadvisor", "skyscanner", "expedia"],
+                "entertainment": ["youtube", "netflix", "twitch", "spotify", "imdb"],
+            }
+            for intent, keywords in _PATTERNS.items():
+                if any(kw in domain for kw in keywords):
+                    result["intent"] = intent
+                    result["confidence"] = 0.5
+                    _ACTIONS = {
+                        "shopping": "Compara precios con GenTab",
+                        "news": "Resume las noticias con el asistente",
+                        "coding": "Analiza el código con el copiloto",
+                        "research": "Crea un resumen ejecutivo de tus fuentes",
+                        "travel": "Compara destinos y precios",
+                        "entertainment": "Descubre contenido relacionado",
+                    }
+                    result["suggested_action"] = _ACTIONS.get(intent, result["suggested_action"])
+                    break
+        except Exception as e:
+            _chat_log.debug("Helio: basic intent error: %s", e)
+        return result
+    def _helio_analyze_with_level(self, level: int) -> dict:
+        """Ejecuta análisis de sesión según el nivel disponible."""
+        if level == 1:
+            try:
+                analyzer = SessionContextAnalyzer()
+                main = self.window()
+                if hasattr(main, "tab_manager"):
+                    return analyzer.analyze_current_session(main.tab_manager)
+            except Exception:
+                pass
+            # Degradar a nivel 2
+            level = 2
+        if level == 2 and _HELIO_INTENT_OK:
+            try:
+                detector = _HelioIntentDetector()
+                main = self.window()
+                if not hasattr(main, "tab_manager"):
+                    return self._helio_basic_intent()
+                tabs = main.tab_manager.tabs
+                domains = []
+                titles = []
+                for i in range(tabs.count()):
+                    w = tabs.widget(i)
+                    if w and hasattr(w, "url"):
+                        url = w.url().toString()
+                        if url and not url.startswith("about:"):
+                            domains.append(urlparse(url).netloc.lower())
+                            if hasattr(w, "page") and w.page():
+                                titles.append(w.page().title() or "")
+                intent = detector.detect_hybrid(domains, titles)
+                confidence = 0.4 if intent.value != "general" else 0.2
+                return {
+                    "intent": intent,
+                    "confidence": confidence,
+                    "tab_count": tabs.count(),
+                    "domains": domains[:5],
+                    "suggested_action": f"Análisis ligero: sesión de {intent.value}",
+                    "source": "helio_level2",
+                }
+            except Exception:
+                pass
+        # Nivel 3: básico
+        basic = self._helio_basic_intent()
+        main = self.window()
+        tab_count = 0
+        if hasattr(main, "tab_manager"):
+            tab_count = main.tab_manager.tabs.count()
+        basic["tab_count"] = tab_count
+        basic["domains"] = []
+        return basic
+    # ── Helio: Contexto de chat para GenTab (Mejora 3) ────────────────────
+
+    def _helio_build_gentab_context(self, user_prompt: str) -> str:
+        """Enriquece el prompt de GenTab con el historial reciente del chat."""
+        try:
+            history_parts = []
+            # Tomar los últimos 6 mensajes del historial de sesión
+            recent = self.session_messages[-6:] if self.session_messages else []
+            total_chars = 0
+            for msg in recent:
+                role = "Usuario" if msg.get("role") == "user" else "Asistente"
+                content = msg.get("content", "")
+                # Truncar mensajes largos
+                if len(content) > 400:
+                    content = content[:400] + "..."
+                history_parts.append(f"{role}: {content}")
+                total_chars += len(content)
+                if total_chars > 2000:
+                    break
+            if history_parts:
+                history_text = "\n".join(history_parts)
+                return (
+                    f"[Contexto de la conversación previa]\n"
+                    f"{history_text}\n\n"
+                    f"[Solicitud actual]\n"
+                    f"{user_prompt}"
+                )
+        except Exception as e:
+            _chat_log.debug("Helio: build_gentab_context error: %s", e)
+        return user_prompt
+    # ── Helio: Panel de sugerencias (Mejora 5) ────────────────────────────
+
+    def _helio_refresh_suggestions(self) -> None:
+        """Actualiza las sugerencias en el panel de navegación."""
+        if not self._helio_suggestion_frames:
+            return
+        try:
+            level = self._helio_detect_intent_level()
+            suggestions = []
+
+            if level == 1 and _AI_NAV_OK:
+                try:
+                    main = self.window()
+                    if hasattr(main, "suggestion_engine") and main.suggestion_engine:
+                        analysis = self._helio_analyze_with_level(1)
+                        if analysis:
+                            raw = main.suggestion_engine.generate_suggestions(analysis)
+                            for s in (raw or [])[:3]:
+                                suggestions.append({
+                                    "icon": "💡",
+                                    "text": getattr(s, "message", str(s)),
+                                    "action": getattr(s, "suggestion_type", None),
+                                })
+                except Exception:
+                    pass
+            # Sugerencias básicas si no hay suficientes del nivel 1
+            if len(suggestions) < 3:
+                main = self.window()
+                tab_count = 0
+                if hasattr(main, "tab_manager"):
+                    tab_count = main.tab_manager.tabs.count()
+                basic = self._helio_basic_intent()
+                intent = basic.get("intent", "general")
+
+                _basic_suggestions = []
+                if tab_count > 4:
+                    _basic_suggestions.append({
+                        "icon": "📚", "text": f"Tienes {tab_count} pestañas — resume todas con IA",
+                        "action": "summarize",
+                    })
+                if intent == "shopping":
+                    _basic_suggestions.append({
+                        "icon": "📊", "text": "Compara productos en una tabla interactiva",
+                        "action": "gentab_compare",
+                    })
+                elif intent == "research":
+                    _basic_suggestions.append({
+                        "icon": "📋", "text": "Genera flashcards de estudio",
+                        "action": "gentab_flashcards",
+                    })
+                elif intent == "news":
+                    _basic_suggestions.append({
+                        "icon": "📰", "text": "Resume las noticias en un briefing",
+                        "action": "gentab_news",
+                    })
+                if tab_count > 1:
+                    _basic_suggestions.append({
+                        "icon": "✨", "text": "Crea un dashboard desde tus pestañas",
+                        "action": "gentab_dashboard",
+                    })
+                _basic_suggestions.append({
+                    "icon": "🧭", "text": "Analiza tu sesión de navegación",
+                    "action": "analyze",
+                })
+
+                for bs in _basic_suggestions:
+                    if len(suggestions) >= 3:
+                        break
+                    if not any(s["text"] == bs["text"] for s in suggestions):
+                        suggestions.append(bs)
+            # Actualizar UI
+            for i, frame in enumerate(self._helio_suggestion_frames):
+                if i < len(suggestions):
+                    s = suggestions[i]
+                    lbl = frame.findChild(QLabel, f"helio_sug_label_{i}")
+                    if lbl:
+                        lbl.setText(f"{s['icon']} {s['text']}")
+                    frame.setProperty("_helio_action", s.get("action"))
+                    frame.show()
+                else:
+                    frame.hide()
+        except Exception as e:
+            _chat_log.debug("Helio: refresh suggestions error: %s", e)
+    def _helio_on_suggestion_clicked(self, index: int) -> None:
+        """Ejecuta la acción de una sugerencia del panel Helio."""
+        try:
+            if index >= len(self._helio_suggestion_frames):
+                return
+            frame = self._helio_suggestion_frames[index]
+            action = frame.property("_helio_action")
+
+            if action == "summarize":
+                self._apply_quick_action(
+                    "Resume todas las pestañas abiertas en un briefing ejecutivo.",
+                    "📚 Resumen pestañas abiertas",
+                )
+            elif action == "analyze":
+                self._run_session_analysis()
+            elif action and action.startswith("gentab_"):
+                _prompts = {
+                    "gentab_compare": "Compara los productos/contenidos de todas las pestañas en una tabla interactiva ordenable.",
+                    "gentab_flashcards": "Genera flashcards interactivas con preguntas y respuestas extraídas del contenido.",
+                    "gentab_news": "Resume las noticias en un briefing ejecutivo con los puntos más importantes.",
+                    "gentab_dashboard": "Crea un dashboard con métricas y datos extraídos de las pestañas. Usa gráficos y contadores.",
+                }
+                prompt = _prompts.get(action, "Genera una app interactiva desde las pestañas.")
+                self._apply_quick_action(prompt, "✨ Crear GenTab")
+            else:
+                # Acción genérica: poner texto en el chat
+                lbl = frame.findChild(QLabel, f"helio_sug_label_{index}")
+                if lbl:
+                    self.set_input_text(lbl.text().lstrip("💡📚📊📋📰✨🧭 "))
+        except Exception as e:
+            _chat_log.debug("Helio: suggestion click error: %s", e)
     # ── Métodos públicos para integración externa ────────────────────────────
 
     def set_input_text(self, text: str) -> None:
@@ -312,7 +740,6 @@ class ChatPanelSafe(BasePanel):
             self.message_input.setFocus()
         if hasattr(self, "tab_widget") and self.tab_widget:
             self.tab_widget.setCurrentIndex(0)
-
     def set_prompt(self, prompt: str) -> None:
         """Recibe un prompt de GenTab, lo muestra y activa el modo GenTab."""
         if hasattr(self, "message_input"):
@@ -323,12 +750,10 @@ class ChatPanelSafe(BasePanel):
                 self.assistant_mode.setCurrentIndex(idx)
         if hasattr(self, "tab_widget") and self.tab_widget:
             self.tab_widget.setCurrentIndex(0)
-
     def show_navigation_tab(self) -> None:
         """Cambia al tab de Navegación IA."""
         if hasattr(self, "tab_widget") and self.tab_widget:
             self.tab_widget.setCurrentIndex(1)
-        
     def create_chat_tab(self):
         """Tab principal del chat — estilo documento, no burbujas."""
         c = self._C
@@ -536,33 +961,38 @@ class ChatPanelSafe(BasePanel):
             lambda: self.send_btn.setEnabled(bool(self.message_input.toPlainText().strip()))
         )
         return widget
-        
     # ── Tab Navegación IA ────────────────────────────────────────────────────
 
+    def _nav_group_style(self, c: dict) -> str:
+        """Estilo de QGroupBox para el tab de navegación usando colores del tema."""
+        return (
+            f"QGroupBox {{ color: {c['text_primary']}; border: 1px solid {c['border']};"
+            f" border-radius: 10px; margin-top: 8px; font-size: 13px; font-weight: bold; }}"
+            f" QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 6px; }}"
+        )
     def create_nav_tab(self):
         """Tab de Navegación Aumentada con IA: análisis de sesión + GenTab."""
+        c = self._build_color_palette()
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
+        group_style = self._nav_group_style(c)
+
         # ── Análisis de sesión ────────────────────────────────────────────────
         session_group = QGroupBox("🧭 Análisis de Sesión")
-        session_group.setStyleSheet("""
-            QGroupBox { color: #e2e8f0; border: 1px solid rgba(99,102,241,0.35);
-                        border-radius: 10px; margin-top: 8px; font-size: 13px; font-weight: bold; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; }
-        """)
+        session_group.setStyleSheet(group_style)
         sg_layout = QVBoxLayout(session_group)
         sg_layout.setSpacing(8)
 
         # Badge de intención
         self._intent_badge = QLabel("— Sin analizar —")
         self._intent_badge.setAlignment(Qt.AlignCenter)
-        self._intent_badge.setStyleSheet("""
-            background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4);
-            border-radius: 8px; padding: 6px 12px; color: #c7d2fe; font-size: 13px;
-        """)
+        self._intent_badge.setStyleSheet(
+            f"background: {c['accent_subtle']}; border: 1px solid {c['border']};"
+            f" border-radius: 8px; padding: 6px 12px; color: {c['text_primary']}; font-size: 13px;"
+        )
         sg_layout.addWidget(self._intent_badge)
 
         # Barra de confianza
@@ -573,31 +1003,33 @@ class ChatPanelSafe(BasePanel):
         self._conf_bar.setValue(0)
         self._conf_bar.setFixedHeight(10)
         self._conf_bar.setTextVisible(False)
-        self._conf_bar.setStyleSheet("""
-            QProgressBar { background: #1a1a3e; border-radius: 5px; border: none; }
-            QProgressBar::chunk { background: #6366f1; border-radius: 5px; }
-        """)
+        self._conf_bar.setStyleSheet(
+            f"QProgressBar {{ background: {c['surface_1']}; border-radius: 5px; border: none; }}"
+            f" QProgressBar::chunk {{ background: {c['accent']}; border-radius: 5px; }}"
+        )
         conf_row.addWidget(self._conf_bar, 1)
         self._conf_pct_label = QLabel("0%")
         self._conf_pct_label.setFixedWidth(36)
-        self._conf_pct_label.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self._conf_pct_label.setStyleSheet(f"color: {c['text_secondary']}; font-size: 12px;")
         conf_row.addWidget(self._conf_pct_label)
         sg_layout.addLayout(conf_row)
 
         # Acción sugerida
         self._suggested_action_label = QLabel("")
         self._suggested_action_label.setWordWrap(True)
-        self._suggested_action_label.setStyleSheet("color: #94a3b8; font-size: 12px; font-style: italic;")
+        self._suggested_action_label.setStyleSheet(
+            f"color: {c['text_secondary']}; font-size: 12px; font-style: italic;"
+        )
         sg_layout.addWidget(self._suggested_action_label)
 
         # Botón de análisis
         analyze_btn = QPushButton("🔍 Analizar sesión actual")
-        analyze_btn.setStyleSheet("""
-            QPushButton { background: rgba(99,102,241,0.2); color: #c7d2fe;
-                          border: 1px solid rgba(99,102,241,0.5); border-radius: 8px;
-                          padding: 7px 14px; font-size: 13px; }
-            QPushButton:hover { background: rgba(99,102,241,0.4); }
-        """)
+        analyze_btn.setStyleSheet(
+            f"QPushButton {{ background: {c['surface_1']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 8px;"
+            f" padding: 7px 14px; font-size: 13px; }}"
+            f" QPushButton:hover {{ background: {c['surface_hover']}; border-color: {c['accent']}; }}"
+        )
         analyze_btn.setCursor(Qt.PointingHandCursor)
         analyze_btn.clicked.connect(self._run_session_analysis)
         sg_layout.addWidget(analyze_btn)
@@ -606,35 +1038,35 @@ class ChatPanelSafe(BasePanel):
 
         # ── Pestañas abiertas ─────────────────────────────────────────────────
         tabs_group = QGroupBox("📑 Pestañas abiertas")
-        tabs_group.setStyleSheet(session_group.styleSheet())
+        tabs_group.setStyleSheet(group_style)
         tg_layout = QVBoxLayout(tabs_group)
         tg_layout.setSpacing(6)
 
         tabs_header = QHBoxLayout()
         self._tabs_count_label = QLabel("0 pestañas")
-        self._tabs_count_label.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self._tabs_count_label.setStyleSheet(f"color: {c['text_secondary']}; font-size: 12px;")
         tabs_header.addWidget(self._tabs_count_label)
         tabs_header.addStretch()
         refresh_tabs_btn = QPushButton("🔄")
         refresh_tabs_btn.setFixedSize(28, 28)
         refresh_tabs_btn.setToolTip("Actualizar lista de pestañas")
-        refresh_tabs_btn.setStyleSheet("""
-            QPushButton { background: rgba(99,102,241,0.15); color: #c7d2fe;
-                          border: 1px solid rgba(99,102,241,0.3); border-radius: 6px; }
-            QPushButton:hover { background: rgba(99,102,241,0.35); }
-        """)
+        refresh_tabs_btn.setStyleSheet(
+            f"QPushButton {{ background: {c['surface_1']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 6px; }}"
+            f" QPushButton:hover {{ background: {c['surface_hover']}; }}"
+        )
         refresh_tabs_btn.clicked.connect(self._refresh_open_tabs_list)
         tabs_header.addWidget(refresh_tabs_btn)
         tg_layout.addLayout(tabs_header)
 
         self._open_tabs_list = QListWidget()
         self._open_tabs_list.setMaximumHeight(130)
-        self._open_tabs_list.setStyleSheet("""
-            QListWidget { background: #1a1a3e; border: 1px solid rgba(99,102,241,0.25);
-                          border-radius: 8px; color: #e2e8f0; font-size: 12px; outline: none; }
-            QListWidget::item { padding: 5px 8px; border-radius: 4px; }
-            QListWidget::item:hover { background: rgba(99,102,241,0.15); }
-        """)
+        self._open_tabs_list.setStyleSheet(
+            f"QListWidget {{ background: {c['surface_1']}; border: 1px solid {c['border']};"
+            f" border-radius: 8px; color: {c['text_primary']}; font-size: 12px; outline: none; }}"
+            f" QListWidget::item {{ padding: 5px 8px; border-radius: 4px; }}"
+            f" QListWidget::item:hover {{ background: {c['surface_hover']}; }}"
+        )
         self._open_tabs_list.itemDoubleClicked.connect(self._on_tab_item_double_click)
         tg_layout.addWidget(self._open_tabs_list)
 
@@ -642,7 +1074,7 @@ class ChatPanelSafe(BasePanel):
 
         # ── Acciones rápidas de navegación ───────────────────────────────────
         actions_group = QGroupBox("⚡ Acciones rápidas")
-        actions_group.setStyleSheet(session_group.styleSheet())
+        actions_group.setStyleSheet(group_style)
         ag_layout = QVBoxLayout(actions_group)
         ag_layout.setSpacing(6)
 
@@ -667,26 +1099,25 @@ class ChatPanelSafe(BasePanel):
              "✨ Crear GenTab"),
         ]
 
+        _qa_style = (
+            f"QPushButton {{ background: {c['surface_1']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 8px;"
+            f" padding: 7px 12px; font-size: 12px; text-align: left; }}"
+            f" QPushButton:hover {{ background: {c['surface_hover']}; border-color: {c['accent']}; }}"
+        )
         for label, prompt, mode_text in quick_actions:
             btn = QPushButton(label)
-            btn.setStyleSheet("""
-                QPushButton { background: rgba(26,26,62,0.8); color: #c7d2fe;
-                              border: 1px solid rgba(99,102,241,0.25); border-radius: 8px;
-                              padding: 7px 12px; font-size: 12px; text-align: left; }
-                QPushButton:hover { background: rgba(99,102,241,0.25);
-                                    border-color: rgba(99,102,241,0.6); }
-            """)
+            btn.setStyleSheet(_qa_style)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(
                 lambda checked=False, p=prompt, m=mode_text: self._apply_quick_action(p, m)
             )
             ag_layout.addWidget(btn)
-
         layout.addWidget(actions_group)
 
         # ── GenTab directo ───────────────────────────────────────────────────
         gentab_group = QGroupBox("✨ GenTab — Generador de aplicaciones")
-        gentab_group.setStyleSheet(session_group.styleSheet())
+        gentab_group.setStyleSheet(group_style)
         gg_layout = QVBoxLayout(gentab_group)
         gg_layout.setSpacing(6)
 
@@ -694,7 +1125,7 @@ class ChatPanelSafe(BasePanel):
             "Genera una aplicación web interactiva desde el contenido de tus pestañas."
         )
         gentab_info.setWordWrap(True)
-        gentab_info.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        gentab_info.setStyleSheet(f"color: {c['text_secondary']}; font-size: 12px;")
         gg_layout.addWidget(gentab_info)
 
         self._gentab_prompt_input = QTextEdit()
@@ -704,82 +1135,134 @@ class ChatPanelSafe(BasePanel):
         )
         self._gentab_prompt_input.setMaximumHeight(70)
         self._gentab_prompt_input.setAcceptRichText(False)
-        self._gentab_prompt_input.setStyleSheet("""
-            QTextEdit { background: #1a1a3e; color: #e2e8f0;
-                        border: 1px solid rgba(99,102,241,0.3); border-radius: 8px;
-                        padding: 6px; font-size: 12px; }
-            QTextEdit:focus { border-color: #6366f1; }
-        """)
+        self._gentab_prompt_input.setStyleSheet(
+            f"QTextEdit {{ background: {c['input_bg']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['input_border']}; border-radius: 8px;"
+            f" padding: 6px; font-size: 12px; }}"
+            f" QTextEdit:focus {{ border-color: {c['input_focus']}; }}"
+        )
         gg_layout.addWidget(self._gentab_prompt_input)
 
         open_gentab_btn = QPushButton("✨ Abrir panel GenTab")
-        open_gentab_btn.setStyleSheet("""
-            QPushButton { background: #6366f1; color: white; border: none;
-                          border-radius: 8px; padding: 8px 16px;
-                          font-size: 13px; font-weight: bold; }
-            QPushButton:hover { background: #4f46e5; }
-        """)
+        open_gentab_btn.setStyleSheet(
+            f"QPushButton {{ background: {c['accent']}; color: {c['surface_0']}; border: none;"
+            f" border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: bold; }}"
+            f" QPushButton:hover {{ background: {c['accent_subtle']}; color: {c['accent']}; }}"
+        )
         open_gentab_btn.setCursor(Qt.PointingHandCursor)
         open_gentab_btn.clicked.connect(self._open_gentab_panel)
         gg_layout.addWidget(open_gentab_btn)
 
         layout.addWidget(gentab_group)
+
+        # ── Helio: Panel de sugerencias ────────────────────────
+        helio_group = QGroupBox("💡 Sugerencias Helio")
+        helio_group.setStyleSheet(group_style)
+        hg_layout = QVBoxLayout(helio_group)
+        hg_layout.setSpacing(6)
+
+        helio_info = QLabel("Sugerencias inteligentes basadas en tu actividad")
+        helio_info.setStyleSheet(f"color: {c['text_secondary']}; font-size: 11px; font-style: italic;")
+        hg_layout.addWidget(helio_info)
+
+        self._helio_suggestion_frames = []
+        for i in range(3):
+            frame = QFrame()
+            frame.setStyleSheet(
+                f"QFrame {{ background: {c['surface_1']}; border: 1px solid {c['border']};"
+                f" border-radius: 8px; padding: 4px; }}"
+                f" QFrame:hover {{ background: {c['surface_hover']}; border-color: {c['accent']}; }}"
+            )
+            frame.setCursor(Qt.PointingHandCursor)
+            fl = QHBoxLayout(frame)
+            fl.setContentsMargins(8, 6, 8, 6)
+            fl.setSpacing(8)
+            lbl = QLabel("💡 Cargando sugerencias...")
+            lbl.setObjectName(f"helio_sug_label_{i}")
+            lbl.setStyleSheet(f"color: {c['text_primary']}; font-size: 12px; background: transparent; border: none;")
+            lbl.setWordWrap(True)
+            fl.addWidget(lbl, 1)
+            action_btn = QPushButton("→")
+            action_btn.setFixedSize(24, 24)
+            action_btn.setStyleSheet(
+                f"QPushButton {{ background: {c['accent_subtle']}; color: {c['accent']};"
+                f" border: 1px solid {c['border']}; border-radius: 6px; font-size: 14px; }}"
+                f" QPushButton:hover {{ background: {c['accent']}; color: {c['surface_0']}; }}"
+            )
+            idx = i
+            action_btn.clicked.connect(lambda checked=False, n=idx: self._helio_on_suggestion_clicked(n))
+            fl.addWidget(action_btn)
+            hg_layout.addWidget(frame)
+            self._helio_suggestion_frames.append(frame)
+        refresh_helio_btn = QPushButton("🔄 Actualizar sugerencias")
+        refresh_helio_btn.setStyleSheet(
+            f"QPushButton {{ background: {c['surface_1']}; color: {c['text_primary']};"
+            f" border: 1px solid {c['border']}; border-radius: 8px;"
+            f" padding: 5px 12px; font-size: 12px; }}"
+            f" QPushButton:hover {{ background: {c['surface_hover']}; }}"
+        )
+        refresh_helio_btn.setCursor(Qt.PointingHandCursor)
+        refresh_helio_btn.clicked.connect(self._helio_refresh_suggestions)
+        hg_layout.addWidget(refresh_helio_btn)
+
+        layout.addWidget(helio_group)
+
         layout.addStretch()
 
         # Cargar pestañas al crear el tab
         QTimer.singleShot(500, self._refresh_open_tabs_list)
+        # Helio: cargar sugerencias iniciales
+        QTimer.singleShot(3000, self._helio_refresh_suggestions)
         return widget
-
     # ── Métodos de Navegación IA ─────────────────────────────────────────────
 
     def _run_session_analysis(self) -> None:
-        """Ejecuta el análisis de sesión y muestra resultado en el tab chat."""
+        """Ejecuta el análisis de sesión con fallback Helio de 3 niveles."""
         main = self.window()
         if not hasattr(main, "tab_manager"):
             self.add_message_to_chat("System", "No se puede acceder al gestor de pestañas.", "error")
             return
-
         self._refresh_open_tabs_list()
 
         # Actualizar badge a "analizando"
         self._intent_badge.setText("🔄 Analizando...")
 
-        if _AI_NAV_OK:
-            try:
-                analyzer = SessionContextAnalyzer()
-                analysis = analyzer.analyze_current_session(main.tab_manager)
-                self._last_session_analysis = analysis
-                self._update_session_ui(analysis)
+        # Helio: usar sistema de 3 niveles
+        level = self._helio_detect_intent_level()
+        analysis = self._helio_analyze_with_level(level)
 
-                # Lanzar análisis IA en el chat
-                intent_name = analysis["intent"].value if analysis.get("intent") else "general"
-                conf = int(analysis.get("confidence", 0) * 100)
-                tab_count = analysis.get("tab_count", 0)
-                domains = ", ".join(analysis.get("domains", [])[:5])
-                action = analysis.get("suggested_action", "")
+        if analysis:
+            self._last_session_analysis = analysis
+            self._update_session_ui(analysis)
 
-                analysis_summary = (
-                    f"Analiza mi sesión de navegación actual:\n"
-                    f"- Intención detectada: {intent_name} (confianza: {conf}%)\n"
-                    f"- Pestañas abiertas: {tab_count}\n"
-                    f"- Dominios: {domains or 'varios'}\n"
-                    f"- Acción sugerida: {action}\n\n"
-                    f"Dame un análisis detallado con insights y próximos pasos."
-                )
+            intent = analysis.get("intent")
+            intent_name = intent.value if hasattr(intent, "value") else str(intent)
+            conf = int(analysis.get("confidence", 0) * 100)
+            tab_count = analysis.get("tab_count", 0)
+            domains = ", ".join(analysis.get("domains", [])[:5])
+            action = analysis.get("suggested_action", "")
+            source = analysis.get("source", f"nivel {level}")
 
-                if hasattr(self, "message_input"):
-                    self.message_input.setPlainText(analysis_summary)
-                if hasattr(self, "assistant_mode"):
-                    idx = self.assistant_mode.findText("🧭 Analizar sesión")
-                    if idx >= 0:
-                        self.assistant_mode.setCurrentIndex(idx)
-                if hasattr(self, "tab_widget"):
-                    self.tab_widget.setCurrentIndex(0)
-                return
-            except Exception as e:
-                pass
+            analysis_summary = (
+                f"Analiza mi sesión de navegación actual:\n"
+                f"- Intención detectada: {intent_name} (confianza: {conf}%)\n"
+                f"- Pestañas abiertas: {tab_count}\n"
+                f"- Dominios: {domains or 'varios'}\n"
+                f"- Acción sugerida: {action}\n"
+                f"- Motor de análisis: {source}\n\n"
+                f"Dame un análisis detallado con insights y próximos pasos."
+            )
 
-        # Fallback sin módulo AI
+            if hasattr(self, "message_input"):
+                self.message_input.setPlainText(analysis_summary)
+            if hasattr(self, "assistant_mode"):
+                idx = self.assistant_mode.findText("🧭 Analizar sesión")
+                if idx >= 0:
+                    self.assistant_mode.setCurrentIndex(idx)
+            if hasattr(self, "tab_widget"):
+                self.tab_widget.setCurrentIndex(0)
+            return
+        # Fallback final: extracción directa
         tabs_context = self._extract_all_open_tabs_context(limit_tabs=6)
         prompt = (
             "Analiza estas pestañas que tengo abiertas y dime:\n"
@@ -793,7 +1276,6 @@ class ChatPanelSafe(BasePanel):
         if hasattr(self, "tab_widget"):
             self.tab_widget.setCurrentIndex(0)
         self._intent_badge.setText("🧭 Análisis manual solicitado")
-
     def _update_session_ui(self, analysis: dict) -> None:
         """Actualiza los widgets del tab Navegación con los datos del análisis."""
         intent = analysis.get("intent")
@@ -809,7 +1291,9 @@ class ChatPanelSafe(BasePanel):
             "entertainment": "🎬 Entretenimiento",
             "general":       "🌐 General",
         }
-        label = _INTENT_LABELS.get(intent.value if intent else "general", "🌐 General")
+        # Helio: soportar tanto enums como strings de los diferentes niveles
+        intent_key = intent.value if hasattr(intent, "value") else str(intent) if intent else "general"
+        label = _INTENT_LABELS.get(intent_key, "🌐 General")
         pct = int(confidence * 100)
 
         self._intent_badge.setText(label)
@@ -817,7 +1301,6 @@ class ChatPanelSafe(BasePanel):
         self._conf_pct_label.setText(f"{pct}%")
         if action:
             self._suggested_action_label.setText(f"💡 {action}")
-
     def _refresh_open_tabs_list(self) -> None:
         """Actualiza la lista de pestañas abiertas en el tab Navegación."""
         if not hasattr(self, "_open_tabs_list"):
@@ -842,7 +1325,6 @@ class ChatPanelSafe(BasePanel):
             self._open_tabs_list.addItem(item)
             count += 1
         self._tabs_count_label.setText(f"{count} pestaña{'s' if count != 1 else ''}")
-
     def _on_tab_item_double_click(self, item: QListWidgetItem) -> None:
         """Al hacer doble clic en una pestaña, activa ese tab en el navegador."""
         url = item.data(Qt.UserRole)
@@ -857,7 +1339,6 @@ class ChatPanelSafe(BasePanel):
             if w and hasattr(w, "url") and w.url().toString() == url:
                 tabs.setCurrentIndex(i)
                 break
-
     def _apply_quick_action(self, prompt: str, mode_text: str) -> None:
         """Aplica una acción rápida: pone el prompt en el input y activa el modo."""
         if hasattr(self, "message_input"):
@@ -868,13 +1349,11 @@ class ChatPanelSafe(BasePanel):
                 self.assistant_mode.setCurrentIndex(idx)
         if hasattr(self, "tab_widget"):
             self.tab_widget.setCurrentIndex(0)
-
     def _open_gentab_panel(self) -> None:
         """Abre el panel GenTab desde el botón del tab Navegación."""
         prompt = ""
         if hasattr(self, "_gentab_prompt_input"):
             prompt = self._gentab_prompt_input.toPlainText().strip()
-
         main = self.window()
         if hasattr(main, "gentab_panel") and main.gentab_panel:
             if hasattr(main, "show_advanced_panel"):
@@ -884,7 +1363,6 @@ class ChatPanelSafe(BasePanel):
         else:
             # Emitir señal para que la MainWindow lo maneje
             self.gentab_requested.emit(prompt)
-
     def create_settings_tab(self):
         """Tab de configuración del servidor LLM"""
         widget = QWidget()
@@ -902,6 +1380,7 @@ class ChatPanelSafe(BasePanel):
         self.chat_provider_combo.addItem("🖥️ LM Studio / Local", PROVIDER_LOCAL)
         self.chat_provider_combo.addItem("☁️ llmapi.ai (cloud gratuito)", PROVIDER_LLMAPI)
         self.chat_provider_combo.addItem("🤖 Anthropic (Claude)", PROVIDER_ANTHROPIC)
+        self.chat_provider_combo.addItem("🤗 HuggingFace (Inference API)", PROVIDER_HUGGINGFACE)
         prov_row.addWidget(self.chat_provider_combo)
         prov_layout.addLayout(prov_row)
 
@@ -1038,6 +1517,70 @@ class ChatPanelSafe(BasePanel):
         prov_layout.addWidget(self.chat_anthropic_widget)
         # ── fin panel Anthropic ──────────────────────────────────────────────
 
+        # ── Panel HuggingFace ────────────────────────────────────────────────
+        self.chat_hf_widget = QWidget()
+        hf_layout = QVBoxLayout(self.chat_hf_widget)
+        hf_layout.setContentsMargins(0, 0, 0, 0)
+        hf_layout.setSpacing(6)
+
+        # API Key
+        hf_key_row = QHBoxLayout()
+        hf_key_lbl = QLabel("API Key:")
+        hf_key_lbl.setFixedWidth(72)
+        hf_key_row.addWidget(hf_key_lbl)
+        self.chat_hf_key_input = QLineEdit()
+        self.chat_hf_key_input.setPlaceholderText("hf_...")
+        self.chat_hf_key_input.setEchoMode(QLineEdit.Password)
+        hf_key_row.addWidget(self.chat_hf_key_input)
+        hf_show_btn = QPushButton("👁")
+        hf_show_btn.setMaximumWidth(32)
+        hf_show_btn.setCheckable(True)
+        hf_show_btn.toggled.connect(
+            lambda on: self.chat_hf_key_input.setEchoMode(
+                QLineEdit.Normal if on else QLineEdit.Password
+            )
+        )
+        hf_key_row.addWidget(hf_show_btn)
+        hf_layout.addLayout(hf_key_row)
+
+        # Selector de modelo
+        hf_model_row = QHBoxLayout()
+        hf_model_lbl = QLabel("Modelo:")
+        hf_model_lbl.setFixedWidth(72)
+        hf_model_row.addWidget(hf_model_lbl)
+        self.chat_hf_model_combo = QComboBox()
+        for hf_m in HUGGINGFACE_MODELS:
+            self.chat_hf_model_combo.addItem(hf_m)
+        self.chat_hf_model_combo.setEditable(True)
+        self.chat_hf_model_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.chat_hf_model_combo.setPlaceholderText("organización/nombre-del-modelo")
+        hf_model_row.addWidget(self.chat_hf_model_combo)
+        hf_layout.addLayout(hf_model_row)
+
+        # Descripción del modelo
+        self.chat_hf_model_desc = QLabel("")
+        self.chat_hf_model_desc.setWordWrap(True)
+        self.chat_hf_model_desc.setStyleSheet(
+            f"color: {self._C['text_secondary']}; font-size: 11px;"
+        )
+        hf_layout.addWidget(self.chat_hf_model_desc)
+        self.chat_hf_model_combo.currentTextChanged.connect(self._update_hf_model_desc)
+
+        # Enlace a HuggingFace
+        hf_info = QLabel(
+            '🔑 Genera tu token en '
+            '<a href="https://huggingface.co/settings/tokens" '
+            'style="color:#4B9EFF;">huggingface.co/settings/tokens</a>'
+            ' (rol <em>Inference</em>)'
+        )
+        hf_info.setOpenExternalLinks(True)
+        hf_info.setTextFormat(Qt.RichText)
+        hf_info.setStyleSheet(f"color: {self._C['text_secondary']}; font-size: 11px;")
+        hf_layout.addWidget(hf_info)
+
+        prov_layout.addWidget(self.chat_hf_widget)
+        # ── fin panel HuggingFace ────────────────────────────────────────────
+
         # Estado + botones
         conn_row = QHBoxLayout()
         self.test_btn = QPushButton("🔗 Probar conexión")
@@ -1088,12 +1631,12 @@ class ChatPanelSafe(BasePanel):
 
         widget.setLayout(layout)
         return widget
-
     def _populate_chat_settings_ui(self):
         provider_index_map = {
             PROVIDER_LOCAL: 0,
             PROVIDER_LLMAPI: 1,
             PROVIDER_ANTHROPIC: 2,
+            PROVIDER_HUGGINGFACE: 3,
         }
         idx = provider_index_map.get(self.llm_config.provider, 0)
         if hasattr(self, "chat_provider_combo"):
@@ -1117,10 +1660,20 @@ class ChatPanelSafe(BasePanel):
                     self.chat_anthropic_model_combo.setCurrentIndex(i)
                     break
             self._update_anthropic_model_desc(self.chat_anthropic_model_combo.currentText())
+        # Poblar campos HuggingFace
+        if hasattr(self, "chat_hf_key_input"):
+            self.chat_hf_key_input.setText(self.llm_config.huggingface_key or "")
+        if hasattr(self, "chat_hf_model_combo"):
+            hf_target = self.llm_config.huggingface_model or HUGGINGFACE_DEFAULT_MODEL
+            hf_mi = self.chat_hf_model_combo.findText(hf_target)
+            if hf_mi >= 0:
+                self.chat_hf_model_combo.setCurrentIndex(hf_mi)
+            else:
+                self.chat_hf_model_combo.setEditText(hf_target)
+            self._update_hf_model_desc(self.chat_hf_model_combo.currentText())
         if hasattr(self, "max_tokens_spin"):
             self.max_tokens_spin.setValue(int(self.llm_config.max_tokens))
         self._on_chat_provider_changed()
-
     _ANTHROPIC_MODEL_DESCRIPTIONS = {
         "claude-opus-4-5":    "Opus 4.5 — el más potente, razonamiento avanzado, 200k ctx",
         "claude-sonnet-4-5":  "Sonnet 4.5 — balance óptimo inteligencia/velocidad (recomendado)",
@@ -1138,7 +1691,28 @@ class ChatPanelSafe(BasePanel):
             return
         desc = self._ANTHROPIC_MODEL_DESCRIPTIONS.get(model_text, "")
         self.chat_anthropic_model_desc.setText(desc)
+    _HUGGINGFACE_MODEL_DESCRIPTIONS = {
+        "meta-llama/Llama-3.3-70B-Instruct": "Llama 3.3 70B — el más potente de Meta, excelente en razonamiento",
+        "meta-llama/Llama-3.1-8B-Instruct": "Llama 3.1 8B — ligero y rápido, ideal para tareas sencillas",
+        "meta-llama/Llama-3.2-3B-Instruct": "Llama 3.2 3B — ultra-ligero, respuestas muy rápidas",
+        "mistralai/Mistral-7B-Instruct-v0.3": "Mistral 7B — equilibrio rendimiento/velocidad, multilingüe",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1": "Mixtral 8x7B — MoE de alto rendimiento, contexto largo",
+        "mistralai/Mistral-Small-3.1-24B-Instruct-2503": "Mistral Small 3.1 24B — versión reciente, capacidades avanzadas",
+        "Qwen/Qwen2.5-72B-Instruct": "Qwen 2.5 72B — muy potente, destaca en código y matemáticas",
+        "Qwen/Qwen2.5-Coder-32B-Instruct": "Qwen 2.5 Coder 32B — especializado en programación",
+        "deepseek-ai/DeepSeek-R1": "DeepSeek R1 — razonamiento avanzado tipo o1, respuestas largas",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B": "DeepSeek R1 Distill 32B — R1 destilado, más rápido",
+        "google/gemma-2-27b-it": "Gemma 2 27B — modelo de Google, muy capaz en instrucciones",
+        "google/gemma-2-9b-it": "Gemma 2 9B — versión ligera de Gemma, rápida y eficiente",
+        "microsoft/Phi-4-mini-instruct": "Phi-4 Mini — modelo compacto de Microsoft, sorprendentemente capaz",
+    }
 
+    def _update_hf_model_desc(self, model_text: str) -> None:
+        """Actualiza la descripción del modelo HuggingFace seleccionado."""
+        if not hasattr(self, "chat_hf_model_desc"):
+            return
+        desc = self._HUGGINGFACE_MODEL_DESCRIPTIONS.get(model_text, "")
+        self.chat_hf_model_desc.setText(desc)
     def _on_chat_provider_changed(self):
         if not hasattr(self, "chat_provider_combo"):
             return
@@ -1149,47 +1723,47 @@ class ChatPanelSafe(BasePanel):
             self.chat_cloud_widget.setVisible(provider == PROVIDER_LLMAPI)
         if hasattr(self, "chat_anthropic_widget"):
             self.chat_anthropic_widget.setVisible(provider == PROVIDER_ANTHROPIC)
-        
+        if hasattr(self, "chat_hf_widget"):
+            self.chat_hf_widget.setVisible(provider == PROVIDER_HUGGINGFACE)
     def create_history_tab(self):
         """Tab del historial de conversaciones"""
         widget = QWidget()
         layout = QVBoxLayout()
-        
+
         # Controls
         controls_layout = QHBoxLayout()
-        
+
         self.refresh_history_btn = QPushButton("🔄 Refresh History")
         self.refresh_history_btn.clicked.connect(self.refresh_history)
         controls_layout.addWidget(self.refresh_history_btn)
-        
+
         self.clear_history_btn = QPushButton("🗑️ Clear History")
         self.clear_history_btn.clicked.connect(self.clear_history)
         controls_layout.addWidget(self.clear_history_btn)
-        
+
         self.export_history_btn = QPushButton("📤 Export History")
         self.export_history_btn.clicked.connect(self.export_history)
         controls_layout.addWidget(self.export_history_btn)
-        
+
         layout.addLayout(controls_layout)
-        
+
         # History list
         self.history_list = QListWidget()
         self.history_list.itemDoubleClicked.connect(self.load_conversation)
         layout.addWidget(self.history_list)
-        
+
         widget.setLayout(layout)
         return widget
-        
     def create_help_tab(self):
         """Tab de ayuda y documentación"""
         widget = QWidget()
         layout = QVBoxLayout()
-        
+
         help_text = QTextEdit()
         help_text.setReadOnly(True)
         help_text.setHtml("""
         <h2>🤖 Chat with IA Panel - Help</h2>
-        
+
         <h3>Initial Configuration:</h3>
         <ol>
             <li>Download and install <a href="https://lmstudio.ai/">LM Studio</a></li>
@@ -1198,27 +1772,27 @@ class ChatPanelSafe(BasePanel):
             <li>Configure the server URL in the "Settings" tab</li>
             <li>Test the connection</li>
         </ol>
-        
+
         <h3>Using the Chat:</h3>
         <ul>
             <li><strong>Send message:</strong> Write in the text area and press "Send"</li>
             <li><strong>Page context:</strong> Check the box to include information about the current page</li>
             <li><strong>Clear chat:</strong> Use the "Clear Chat" button to start a new conversation</li>
         </ul>
-        
+
         <h3>Advanced Settings:</h3>
         <ul>
             <li><strong>Temperature:</strong> Controls the creativity of responses (0.0 = very conservative, 1.0 = very creative)</li>
             <li><strong>Max tokens:</strong> Limits the length of responses</li>
         </ul>
-        
+
         <h3>Typical LM Studio URLs:</h3>
         <ul>
             <li><code>http://localhost:1234</code> - Default port</li>
             <li><code>http://localhost:8080</code> - Alternative port</li>
             <li><code>http://127.0.0.1:1234</code> - Local IP</li>
         </ul>
-        
+
         <h3>Troubleshooting:</h3>
         <ul>
             <li><strong>Connection error:</strong> Ensure LM Studio is running</li>
@@ -1226,17 +1800,15 @@ class ChatPanelSafe(BasePanel):
             <li><strong>Empty response:</strong> Try a simpler message</li>
         </ul>
         """)
-        
+
         layout.addWidget(help_text)
         widget.setLayout(layout)
         return widget
-        
     def on_server_url_changed(self):
         url = self.server_url_input.text().strip()
         self.server_url = url
         self.llm_config.local_url = url
-        self.send_btn.setEnabled(bool(url) or self.llm_config.provider in (PROVIDER_LLMAPI, PROVIDER_ANTHROPIC))
-
+        self.send_btn.setEnabled(bool(url) or self.llm_config.provider in (PROVIDER_LLMAPI, PROVIDER_ANTHROPIC, PROVIDER_HUGGINGFACE))
     def save_server_url(self):
         """Guarda configuración del proveedor LLM."""
         if hasattr(self, "chat_provider_combo"):
@@ -1257,12 +1829,18 @@ class ChatPanelSafe(BasePanel):
             )
             if item and item.isEnabled():
                 self.llm_config.anthropic_model = self.chat_anthropic_model_combo.currentText()
+        # Guardar configuración HuggingFace
+        if hasattr(self, "chat_hf_key_input"):
+            self.llm_config.huggingface_key = self.chat_hf_key_input.text().strip()
+        if hasattr(self, "chat_hf_model_combo"):
+            hf_model = self.chat_hf_model_combo.currentText().strip()
+            if hf_model:
+                self.llm_config.huggingface_model = hf_model
         if hasattr(self, "max_tokens_spin"):
             self.llm_config.max_tokens = self.max_tokens_spin.value()
         self.llm_config.save("ChatPanel")
         if hasattr(self, "connection_status_label"):
             self.connection_status_label.setText("✅ Guardado")
-
     def test_connection_safe(self):
         """Prueba la conexión con el proveedor configurado."""
         c = self._C
@@ -1299,14 +1877,12 @@ class ChatPanelSafe(BasePanel):
                     f"color: {c['error']}; font-size: 11px; background: transparent;"
                 )
             QMessageBox.warning(self, "Error", str(e))
-            
     def send_message_safe(self):
         """Send message safely without threads"""
         message = self.message_input.toPlainText().strip()
         if not message:
             QMessageBox.warning(self, "Error", "Please write a message")
             return
-
         # Get context from the visible display (what user extracted)
         context = ""
         if self.context_checkbox.isChecked():
@@ -1315,7 +1891,6 @@ class ChatPanelSafe(BasePanel):
                 # No valid context extracted
                 self.add_message_to_chat("System", "⚠️ Warning: Context checkbox is enabled but no page content extracted. Click 'Extract Page Content' first.", "error")
                 context = ""
-
         # Add user message to chat
         self.add_message_to_chat("User", message, "user")
 
@@ -1333,7 +1908,6 @@ class ChatPanelSafe(BasePanel):
         if self._try_handle_browser_command(message):
             self.message_input.clear()
             return
-
         if self.llm_config.provider == PROVIDER_LOCAL and not self.llm_config.local_url:
             QMessageBox.warning(self, "Error", "Configura la URL del servidor en la pestaña Settings")
             return
@@ -1343,7 +1917,9 @@ class ChatPanelSafe(BasePanel):
         if self.llm_config.provider == PROVIDER_ANTHROPIC and not self.llm_config.anthropic_key:
             QMessageBox.warning(self, "Error", "Introduce tu API key de Anthropic en la pestaña Settings (sk-ant-...)")
             return
-
+        if self.llm_config.provider == PROVIDER_HUGGINGFACE and not self.llm_config.huggingface_key:
+            QMessageBox.warning(self, "Error", "Introduce tu token de HuggingFace en la pestaña Settings (hf_...)")
+            return
         # Clear input
         self.message_input.clear()
 
@@ -1363,7 +1939,6 @@ class ChatPanelSafe(BasePanel):
                     "Incluye puntos clave, hallazgos y próximos pasos.\n\n"
                     f"{context}\n\nSolicitud del usuario: {message}"
                 )
-
             elif mode.startswith("📚"):  # resumen multi-pestaña
                 all_tabs_context = self._extract_all_open_tabs_context(limit_tabs=8)
                 user_content = (
@@ -1372,21 +1947,20 @@ class ChatPanelSafe(BasePanel):
                     f"{all_tabs_context}\n\nSolicitud del usuario: {message}"
                 )
                 self.add_message_to_chat("System", "📚 Contexto multi-pestaña extraído.", "assistant")
-
             elif mode.startswith("🧭"):  # analizar sesión
                 all_tabs_context = self._extract_all_open_tabs_context(limit_tabs=10)
                 intent_info = ""
-                if _AI_NAV_OK and self._last_session_analysis:
+                if self._last_session_analysis:
                     intent = self._last_session_analysis.get("intent")
                     conf = int(self._last_session_analysis.get("confidence", 0) * 100)
-                    intent_info = f"\nIntención detectada automáticamente: {intent.value if intent else 'general'} ({conf}% confianza)\n"
+                    intent_name = intent.value if hasattr(intent, "value") else str(intent) if intent else "general"
+                    intent_info = f"\nIntención detectada automáticamente: {intent_name} ({conf}% confianza)\n"
                 user_content = (
                     f"Analiza la sesión de navegación del usuario.{intent_info}\n"
                     f"Pestañas abiertas:\n{all_tabs_context}\n\n"
                     f"Solicitud: {message}"
                 )
                 self.add_message_to_chat("System", "🧭 Contexto de sesión capturado para análisis.", "assistant")
-
             elif mode.startswith("✨"):  # Crear GenTab
                 # Despachar al panel GenTab en vez de al chat
                 self._create_gentab_from_chat(message)
@@ -1395,14 +1969,12 @@ class ChatPanelSafe(BasePanel):
                 self.send_btn.setText("📤 Enviar")
                 self._stop_activity()
                 return
-
             else:
                 if context:
                     user_content = f"""Estoy viendo una página web. Contenido:\n\n{context}\n\n---\n\nBasándote en este contenido, {message}"""
                     self.add_message_to_chat("System", f"📄 Contexto enviado ({len(context)} chars)", "assistant")
                 else:
                     user_content = message
-
             # Seleccionar prompt de sistema según modo
             system_prompt = SYSTEM_PROMPT_BROWSER
             if mode.startswith("📄") or mode.startswith("📚"):
@@ -1412,7 +1984,6 @@ class ChatPanelSafe(BasePanel):
                 )
             elif mode.startswith("🧭"):
                 system_prompt = SYSTEM_PROMPT_NAV_ANALYST
-
             # Conversación persistente: incluir últimos turnos
             history_window = self.session_messages[-10:] if self.session_messages else []
             messages = [{"role": "system", "content": system_prompt}] + history_window + [
@@ -1429,14 +2000,12 @@ class ChatPanelSafe(BasePanel):
             # Lanzar worker asíncrono para no bloquear el UI
             self._launch_chat_worker(messages, message, max_tokens, temperature)
             return  # el resto lo gestionan los slots del worker
-
         except Exception as e:
             _chat_log.critical("Error preparando mensaje: %s", e, exc_info=True)
             self.add_message_to_chat("System", f"Error al preparar mensaje: {e}", "error")
             self.send_btn.setEnabled(True)
             self.send_btn.setText("📤 Enviar")
             self._stop_activity()
-
     # ── Worker asíncrono para chat ────────────────────────────────────────────
 
     def _launch_chat_worker(self, messages: list, original_message: str,
@@ -1446,7 +2015,6 @@ class ChatPanelSafe(BasePanel):
         if self._chat_worker and self._chat_worker.isRunning():
             self._chat_worker.cancel()
             self._chat_worker.wait(2000)
-
         self._streaming_placeholder_added = False
         self._streaming_original_message = original_message
 
@@ -1467,7 +2035,6 @@ class ChatPanelSafe(BasePanel):
         self.send_btn.clicked.connect(self._cancel_chat_worker)
 
         self._chat_worker.start()
-
     def _cancel_chat_worker(self):
         """Cancela el worker en curso y restaura el botón de envío."""
         if self._chat_worker and self._chat_worker.isRunning():
@@ -1476,14 +2043,12 @@ class ChatPanelSafe(BasePanel):
         self.add_message_to_chat("System", "⏹ Generación cancelada.", "assistant")
         self._restore_send_button()
         self._stop_activity()
-
     def _on_chat_chunk(self, chunk: str):
         """Añade fragmento de streaming al último mensaje IA."""
         if not self._streaming_placeholder_added:
             self.add_message_to_chat("IA", "", "assistant")
             self._streaming_placeholder_added = True
             self._streaming_text = ""
-
         self._streaming_text = getattr(self, "_streaming_text", "") + chunk
 
         # Actualizar el QLabel del último mensaje de IA (objectName "bubbleMsg")
@@ -1493,30 +2058,43 @@ class ChatPanelSafe(BasePanel):
         if last_labels:
             last_labels[-1].setText(self._streaming_text)
             last_labels[-1].adjustSize()
-
         # Auto-scroll
         QTimer.singleShot(0, lambda: self.chat_scroll.verticalScrollBar().setValue(
             self.chat_scroll.verticalScrollBar().maximum()
         ))
-
     def _on_chat_finished(self, full_content: str):
         """Llamado cuando el worker termina correctamente."""
         if not self._streaming_placeholder_added:
             # Sin streaming: mostrar de una vez
             self.add_message_to_chat("IA", full_content, "assistant")
+        else:
+            # Streaming terminado: aplicar formato HTML al texto acumulado
+            try:
+                last_labels = self.chat_messages_widget.findChildren(
+                    QLabel, "bubbleMsg"
+                )
+                if last_labels:
+                    formatted = self.format_ai_response(full_content)
+                    last_labels[-1].setTextFormat(Qt.RichText)
+                    last_labels[-1].setText(formatted)
+                    last_labels[-1].adjustSize()
+                    self.chat_messages_widget.updateGeometry()
+                    QTimer.singleShot(10, lambda: self.chat_scroll.verticalScrollBar().setValue(
+                        self.chat_scroll.verticalScrollBar().maximum()
+                    ))
+            except Exception:
+                pass
         # Registrar en historial
         self.session_messages.append({"role": "assistant", "content": full_content})
         original = getattr(self, "_streaming_original_message", "")
         self.save_to_history(original, full_content)
         self._restore_send_button()
         self._stop_activity()
-
     def _on_chat_error(self, error_msg: str):
         """Llamado cuando el worker devuelve un error."""
         self.add_message_to_chat("System", f"⚠️ {error_msg}", "error")
         self._restore_send_button()
         self._stop_activity()
-
     def _restore_send_button(self):
         """Restaura el botón de envío a su estado normal."""
         try:
@@ -1526,7 +2104,6 @@ class ChatPanelSafe(BasePanel):
         self.send_btn.clicked.connect(self.send_message_safe)
         self.send_btn.setEnabled(True)
         self.send_btn.setText("📤 Enviar")
-
     def _try_handle_browser_command(self, message):
         """
         Ejecuta acciones directas del navegador desde lenguaje natural:
@@ -1565,7 +2142,6 @@ class ChatPanelSafe(BasePanel):
                 self._open_url_in_browser(search_url)
                 self.add_message_to_chat("IA", f"🔎 No pude resolver resultado directo. Abrí la búsqueda para: **{query}**\n\n[{search_url}]({search_url})", "assistant")
             return True
-
         # Abrir web(s) (acepta "abre", "abrir", "open", incluso dentro de frase)
         open_match = re.search(
             r"\b(?:abre|abrir|open)\b\s+(.+)$",
@@ -1578,7 +2154,6 @@ class ChatPanelSafe(BasePanel):
             if not target:
                 self.add_message_to_chat("System", "Indica qué quieres abrir. Ejemplo: \"abre github.com\"", "error")
                 return True
-
             links = self._extract_urls_from_message(target)
             urls = [u[0] for u in links]
 
@@ -1587,7 +2162,6 @@ class ChatPanelSafe(BasePanel):
                 domains = re.findall(r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b', target)
                 for d in domains:
                     urls.append(f"https://{d}")
-
             # Si sigue sin haber URLs, abrir una búsqueda con el texto objetivo
             if not urls:
                 opened_url = self._open_best_result_from_query(target)
@@ -1598,15 +2172,15 @@ class ChatPanelSafe(BasePanel):
                     self._open_url_in_browser(search_url)
                     self.add_message_to_chat("IA", f"📂 No detecté una URL exacta, así que abrí una búsqueda para: **{target}**\n\n[{search_url}]({search_url})", "assistant")
                 return True
-
             self._open_urls_in_browser(urls)
             self.add_message_to_chat("IA", f"🚀 He abierto {len(urls)} pestaña(s) en el navegador.", "assistant")
             return True
-
         return False
-
     def _create_gentab_from_chat(self, prompt: str) -> None:
-        """Abre el panel GenTab con el prompt indicado desde el chat."""
+        """Abre el panel GenTab con el prompt enriquecido con historial del chat."""
+        # Helio Mejora 3: enriquecer prompt con historial de conversación
+        enriched_prompt = self._helio_build_gentab_context(prompt)
+
         self.add_message_to_chat(
             "System",
             f"✨ Abriendo GenTab con el prompt: «{prompt[:80]}{'...' if len(prompt) > 80 else ''}»",
@@ -1616,11 +2190,10 @@ class ChatPanelSafe(BasePanel):
         if hasattr(main, "gentab_panel") and main.gentab_panel:
             if hasattr(main, "show_advanced_panel"):
                 main.show_advanced_panel(main.gentab_panel)
-            if prompt and hasattr(main.gentab_panel, "prompt_input"):
-                main.gentab_panel.prompt_input.setPlainText(prompt)
+            if enriched_prompt and hasattr(main.gentab_panel, "prompt_input"):
+                main.gentab_panel.prompt_input.setPlainText(enriched_prompt)
         else:
-            self.gentab_requested.emit(prompt)
-
+            self.gentab_requested.emit(enriched_prompt)
     def _build_search_url(self, query):
         """Construye URL de búsqueda usando el motor predeterminado si existe."""
         q = quote_plus(query)
@@ -1637,7 +2210,6 @@ class ChatPanelSafe(BasePanel):
         except Exception:
             pass
         return f"https://duckduckgo.com/?q={q}"
-
     def _get_search_engine_name(self):
         """Obtiene nombre legible del buscador activo."""
         main = self.window()
@@ -1653,7 +2225,6 @@ class ChatPanelSafe(BasePanel):
         except Exception:
             pass
         return "DuckDuckGo"
-
     def _extract_all_open_tabs_context(self, limit_tabs=8):
         """Extrae contexto de múltiples pestañas abiertas de forma síncrona (con timeout por pestaña)."""
         import logging as _logging
@@ -1663,7 +2234,6 @@ class ChatPanelSafe(BasePanel):
         if not hasattr(main, 'tab_manager') or not main.tab_manager:
             _log.warning("_extract_all_open_tabs_context: tab_manager no disponible")
             return "No se pudo acceder a las pestañas."
-
         contexts = []
         tabs = main.tab_manager.tabs
         total = min(tabs.count(), limit_tabs)
@@ -1679,10 +2249,8 @@ class ChatPanelSafe(BasePanel):
             except Exception as e:
                 _log.warning("Pestaña %d: error obteniendo URL: %s", i, e)
                 continue
-
             if not url or url.startswith("about:"):
                 continue
-
             holder = {"html": None}
             loop = QEventLoop()
 
@@ -1690,7 +2258,6 @@ class ChatPanelSafe(BasePanel):
                 h["html"] = html_content
                 if l.isRunning():
                     l.quit()
-
             _log.debug("Pestaña %d (%s): solicitando HTML…", i, url[:60])
             QTimer.singleShot(3000, loop.quit)
             try:
@@ -1699,12 +2266,10 @@ class ChatPanelSafe(BasePanel):
             except Exception as e:
                 _log.error("Pestaña %d: error en toHtml/loop.exec: %s", i, e, exc_info=True)
                 continue
-
             html_content = holder.get("html") or ""
             if not html_content:
                 _log.warning("Pestaña %d (%s): HTML vacío tras timeout", i, url[:60])
                 continue
-
             try:
                 title = browser.page().title() or f"Tab {i+1}"
                 extracted = self._simple_extract_text(html_content, url, title)
@@ -1712,14 +2277,11 @@ class ChatPanelSafe(BasePanel):
                 _log.debug("Pestaña %d: extraídos %d chars", i, len(extracted))
             except Exception as e:
                 _log.error("Pestaña %d: error extrayendo texto: %s", i, e, exc_info=True)
-
         if not contexts:
             _log.warning("No se pudo extraer contexto de ninguna pestaña")
             return "No se pudo extraer contenido de pestañas abiertas."
-
         _log.info("Contexto multi-pestaña extraído: %d pestañas", len(contexts))
         return "\n\n".join(contexts)
-
     def _start_activity(self, base_text="Procesando..."):
         """Inicia animación suave en la etiqueta de estado."""
         c = self._C
@@ -1733,13 +2295,11 @@ class ChatPanelSafe(BasePanel):
                 "font-size: 11px; background: transparent;"
             )
         self.activity_timer.start(200)
-
     def _tick_activity(self, base_text):
         frame = self._activity_frames[self._activity_idx % len(self._activity_frames)]
         self._activity_idx += 1
         if hasattr(self, "status_label"):
             self.status_label.setText(f"{frame} {base_text}")
-
     def _stop_activity(self):
         """Detiene animación de actividad y actualiza indicador."""
         c = self._C
@@ -1756,7 +2316,6 @@ class ChatPanelSafe(BasePanel):
                 self.status_label.setStyleSheet(
                     f"color: {c['error']}; font-size: 11px; background: transparent;"
                 )
-
     def _get_search_engine_id(self):
         """Obtiene id interno del buscador activo."""
         main = self.window()
@@ -1767,7 +2326,6 @@ class ChatPanelSafe(BasePanel):
         except Exception:
             pass
         return "duckduckgo"
-
     def _open_best_result_from_query(self, query):
         """
         Resuelve una consulta al primer resultado web y lo abre automáticamente.
@@ -1778,7 +2336,6 @@ class ChatPanelSafe(BasePanel):
             self._open_url_in_browser(direct_url)
             return direct_url
         return None
-
     def _resolve_first_result_url(self, query):
         """
         Intenta resolver la consulta a la primera URL real del buscador seleccionado.
@@ -1804,13 +2361,11 @@ class ChatPanelSafe(BasePanel):
                 m = re.search(r'<li class="b_algo".*?<h2><a href="(https?://[^"]+)"', html, re.DOTALL)
                 if m:
                     return m.group(1)
-
             # Google parser (frágil por cambios, pero útil como intento)
             if engine_id == "google":
                 m = re.search(r'/url\\?q=(https?[^&"]+)&', html)
                 if m:
                     return unquote(m.group(1))
-
             # DuckDuckGo parser
             m = re.search(r'class="result__a"[^>]*href="([^"]+)"', html)
             if m:
@@ -1823,12 +2378,9 @@ class ChatPanelSafe(BasePanel):
                         return unquote(uddg[0])
                 if href.startswith("http"):
                     return href
-
         except Exception:
             return None
-
         return None
-        
     def format_ai_response(self, text):
         """
         Formats text with simple lists/headers to readable HTML.
@@ -1836,33 +2388,28 @@ class ChatPanelSafe(BasePanel):
         """
         if not text:
             return text
-            
         # Convert text to HTML with appropriate formatting
         formatted_text = text
-        
-        # Format main headings (lines ending with :)
-        formatted_text = formatted_text.replace('\n\n', '\n')  # Normalize line breaks
-        
-        # Detect and format main headings (lines ending with :)
+
+        # Split preserving paragraph breaks (double newlines)
         lines = formatted_text.split('\n')
         formatted_lines = []
-        
+
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
+                # Línea vacía = separación de párrafo
+                formatted_lines.append('<div style="margin: 8px 0;"></div>')
                 continue
-                
             # Detect main headings (lines ending with :)
             if line.endswith(':') and len(line) < 100:
                 formatted_lines.append(f'<h3 style="margin: 15px 0 10px 0; font-size: 16px; font-weight: bold;">{line}</h3>')
                 continue
-                
             # Detect secondary headings (lines starting with **)
             if line.startswith('**') and line.endswith('**'):
                 title = line[2:-2]  # Remove **
                 formatted_lines.append(f'<h4 style="margin: 12px 0 8px 0; font-size: 14px; font-weight: bold;">{title}</h4>')
                 continue
-                
             # Detect numbered lists (lines starting with number.)
             if line and line[0].isdigit() and '. ' in line[:5]:
                 parts = line.split('. ', 1)
@@ -1871,38 +2418,32 @@ class ChatPanelSafe(BasePanel):
                     content = parts[1]
                     formatted_lines.append(f'<div style="margin: 5px 0; padding-left: 20px;"><strong>{number}.</strong> {content}</div>')
                     continue
-                    
             # Detect list items with *
             if line.startswith('* ') or line.startswith('- '):
                 content = line[2:] if line.startswith('* ') else line[2:]
                 formatted_lines.append(f'<div style="margin: 3px 0; padding-left: 20px;">• {content}</div>')
                 continue
-                
             # Detect list items with +
             if line.startswith('+ '):
                 content = line[2:]
                 formatted_lines.append(f'<div style="margin: 3px 0; padding-left: 20px;">• {content}</div>')
                 continue
-                
             # Detect bold text (**text**)
             if '**' in line:
                 # Replace **text** with <strong>text</strong>
                 import re
                 line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
-                
             # Detect italic text (*text*)
             if '*' in line and '**' not in line:
                 # Replace *text* with <em>text</em> (only if not **)
                 import re
                 line = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', line)
-                
             # Normal line
             if line:
                 formatted_lines.append(f'<div style="margin: 5px 0; line-height: 1.4;">{line}</div>')
-        
         # Join all formatted lines
         formatted_text = '\n'.join(formatted_lines)
-        
+
         # No inline styles - use current theme QSS
         formatted_text = f"""
         <div style="
@@ -1915,9 +2456,8 @@ class ChatPanelSafe(BasePanel):
             {formatted_text}
         </div>
         """
-        
-        return formatted_text
 
+        return formatted_text
     def add_message_to_chat(self, sender, message, message_type):
         """
         Añade un mensaje al chat — estilo documento (no burbujas).
@@ -1944,7 +2484,6 @@ class ChatPanelSafe(BasePanel):
         else:
             msg_widget.setObjectName("errorBubble")
             margin_left = 0
-
         msg_layout = QVBoxLayout(msg_widget)
         msg_layout.setSpacing(2)
 
@@ -1952,7 +2491,6 @@ class ChatPanelSafe(BasePanel):
             msg_layout.setContentsMargins(12, 8, 10, 8)
         else:
             msg_layout.setContentsMargins(12, 6, 10, 6)
-
         # Fila meta: remitente + hora
         meta_row = QHBoxLayout()
         meta_row.setSpacing(6)
@@ -1983,7 +2521,6 @@ class ChatPanelSafe(BasePanel):
         else:
             msg_lbl = QLabel(_html.escape(message) if message_type != "assistant" else message)
             msg_lbl.setTextFormat(Qt.PlainText if message_type != "assistant" else Qt.RichText)
-
         msg_lbl.setObjectName("bubbleMsg")
         msg_lbl.setWordWrap(True)
         msg_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
@@ -1996,7 +2533,6 @@ class ChatPanelSafe(BasePanel):
             search_links = self._extract_search_links_from_message(message)
             if search_links:
                 self._add_recommendation_cards(msg_layout, search_links)
-
         # Añadir a la lista con margen izquierdo para mensajes de usuario
         if margin_left:
             row = QHBoxLayout()
@@ -2008,7 +2544,6 @@ class ChatPanelSafe(BasePanel):
             self.chat_messages_layout.addWidget(row_widget)
         else:
             self.chat_messages_layout.addWidget(msg_widget)
-
         # Forzar actualización de layout
         self.chat_messages_widget.updateGeometry()
         self.chat_scroll.updateGeometry()
@@ -2017,7 +2552,6 @@ class ChatPanelSafe(BasePanel):
         QTimer.singleShot(10, lambda: self.chat_scroll.verticalScrollBar().setValue(
             self.chat_scroll.verticalScrollBar().maximum()
         ))
-
     def _extract_urls_from_message(self, text):
         """Extrae URLs de la respuesta de la IA: markdown [texto](url) y URLs planas."""
         if not text:
@@ -2035,7 +2569,6 @@ class ChatPanelSafe(BasePanel):
             if not any(u[0] == url for u in urls):
                 urls.append((url, None))
         return urls[:10]  # Máximo 10 para no saturar la UI
-
     def _extract_search_links_from_message(self, text):
         """
         Convierte recomendaciones de la IA en enlaces de búsqueda robustos.
@@ -2055,7 +2588,6 @@ class ChatPanelSafe(BasePanel):
             seen.add(search_url)
             label = title or query
             search_links.append((search_url, label))
-
         # Fallback: sólo extraer bullets que parezcan nombres de sitios/herramientas,
         # NUNCA cabeceras markdown, frases largas de análisis ni mensajes del sistema.
         if not search_links and text:
@@ -2085,14 +2617,11 @@ class ChatPanelSafe(BasePanel):
                 search_links.append((search_url, query))
                 if len(search_links) >= 5:
                     break
-
         return search_links[:10]
-
     def _build_search_query_from_recommendation(self, url, title=None):
         """Construye una query estable para buscador desde URL/título sugerido por IA."""
         if title and title.strip():
             return title.strip()
-
         clean = re.sub(r'^https?://', '', (url or '').strip(), flags=re.IGNORECASE)
         clean = clean.split('#')[0].split('?')[0]
         parts = [p for p in clean.split('/') if p]
@@ -2103,7 +2632,6 @@ class ChatPanelSafe(BasePanel):
         path = path.replace('-', ' ').replace('_', ' ')
         query = f"{domain} {path}".strip()
         return query[:120]
-
     def _add_recommendation_cards(self, parent_layout, urls):
         """Añade tarjetas para abrir resultados de búsqueda en pestañas."""
         rec_frame = QFrame()
@@ -2156,7 +2684,6 @@ class ChatPanelSafe(BasePanel):
             """)
             open_all_btn.clicked.connect(lambda: self._open_urls_in_browser([u[0] for u in urls]))
             rec_layout.addWidget(open_all_btn)
-
         rec_frame.setStyleSheet("""
             QFrame#recommendationCards {
                 background: rgba(26, 115, 232, 0.06);
@@ -2165,7 +2692,6 @@ class ChatPanelSafe(BasePanel):
             }
         """)
         parent_layout.addWidget(rec_frame)
-
     def _auto_open_recommendations(self, search_links, max_auto_open=3):
         """
         Abre automáticamente resultados web reales desde recomendaciones de búsqueda.
@@ -2190,18 +2716,15 @@ class ChatPanelSafe(BasePanel):
             if direct:
                 self._open_url_in_browser(direct)
                 opened += 1
-
     def _open_url_in_browser(self, url):
         """Abre una URL en una nueva pestaña del navegador."""
         main = self.window()
         if hasattr(main, 'tab_manager') and main.tab_manager:
             main.tab_manager.add_new_tab(url)
-
     def _open_urls_in_browser(self, urls):
         """Abre varias URLs en pestañas nuevas."""
         for url in urls:
             self._open_url_in_browser(url)
-
     def clear_chat(self):
         """Clear chat area"""
         for i in reversed(range(self.chat_messages_layout.count())):
@@ -2211,7 +2734,6 @@ class ChatPanelSafe(BasePanel):
         self.chat_history = []
         self.session_messages = []
         self._stop_activity()
-        
     def save_to_history(self, user_message, ai_response):
         """Save conversation to history"""
         conversation = {
@@ -2221,7 +2743,6 @@ class ChatPanelSafe(BasePanel):
         }
         self.chat_history.append(conversation)
         self.refresh_history()
-        
     def refresh_history(self):
         """Update history list"""
         self.history_list.clear()
@@ -2231,7 +2752,6 @@ class ChatPanelSafe(BasePanel):
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, i)
             self.history_list.addItem(item)
-            
     def load_conversation(self, item):
         """Load conversation from history"""
         index = item.data(Qt.UserRole)
@@ -2240,18 +2760,15 @@ class ChatPanelSafe(BasePanel):
             self.clear_chat()
             self.add_message_to_chat("User", conv["user_message"], "user")
             self.add_message_to_chat("IA", conv["ai_response"], "assistant")
-            
     def clear_history(self):
         """Clear history"""
         self.chat_history.clear()
         self.history_list.clear()
-        
     def export_history(self):
         """Export history to file"""
         if not self.chat_history:
             QMessageBox.information(self, "History", "No conversations to export")
             return
-            
         try:
             filename = f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             with open(filename, 'w', encoding='utf-8') as f:
@@ -2259,7 +2776,6 @@ class ChatPanelSafe(BasePanel):
             QMessageBox.information(self, "Export", f"History exported to {filename}")
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not export history: {e}")
-            
     def load_settings(self):
         """Load saved settings"""
         try:
@@ -2268,7 +2784,6 @@ class ChatPanelSafe(BasePanel):
             pass
         except Exception as e:
             print(f"Error loading configuration: {e}")
-            
     def save_settings(self):
         """Save settings"""
         try:
@@ -2276,12 +2791,10 @@ class ChatPanelSafe(BasePanel):
             pass
         except Exception as e:
             print(f"Error saving configuration: {e}") 
-
     def update_context_info(self):
         """DEPRECATED - Trigger extraction instead"""
         # Now we just trigger the extraction
         self.extract_page_content_now()
-    
     def on_context_toggled(self, checked):
         """Callback when context is toggled"""
         if checked:
@@ -2290,7 +2803,6 @@ class ChatPanelSafe(BasePanel):
                 self.add_message_to_chat("System", "💡 Tip: Click 'Extract Page Content' to load the current page's content", "assistant")
         else:
             self.add_message_to_chat("System", "ℹ️ Page context disabled - AI will not receive page content", "assistant")
-    
     def extract_page_content_now(self):
         """Extract page content and display it - SIMPLE VERSION"""
         try:
@@ -2304,13 +2816,11 @@ class ChatPanelSafe(BasePanel):
                 self.context_display.setPlainText("❌ Error: Cannot access tab manager")
                 self.extract_context_btn.setEnabled(True)
                 return
-
             current_tab = main_window.tab_manager.tabs.currentWidget()
             if not current_tab or not hasattr(current_tab, 'page'):
                 self.context_display.setPlainText("❌ Error: No active tab")
                 self.extract_context_btn.setEnabled(True)
                 return
-
             # Get URL and title
             current_url = current_tab.url().toString()
             current_title = current_tab.page().title()
@@ -2326,7 +2836,6 @@ class ChatPanelSafe(BasePanel):
 
                     # Add success message to chat
                     self.add_message_to_chat("System", f"✅ Page content extracted: {len(extracted_text)} characters", "assistant")
-
                 except Exception as e:
                     error_msg = f"❌ Error extracting content: {str(e)}"
                     self.context_display.setPlainText(error_msg)
@@ -2335,10 +2844,8 @@ class ChatPanelSafe(BasePanel):
                     traceback.print_exc()
                 finally:
                     self.extract_context_btn.setEnabled(True)
-
             # Request HTML asynchronously
             current_tab.page().toHtml(on_html_received)
-
         except Exception as e:
             error_msg = f"❌ Error: {str(e)}"
             self.context_display.setPlainText(error_msg)
@@ -2346,7 +2853,6 @@ class ChatPanelSafe(BasePanel):
             import traceback
             traceback.print_exc()
             self.extract_context_btn.setEnabled(True)
-
     def _simple_extract_text(self, html, url, title):
         """Simple and effective text extraction"""
         try:
@@ -2358,7 +2864,6 @@ class ChatPanelSafe(BasePanel):
             # Remove unwanted elements
             for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'noscript', 'form']):
                 element.decompose()
-
             # Get all text
             text = soup.get_text(separator='\n', strip=True)
 
@@ -2368,7 +2873,6 @@ class ChatPanelSafe(BasePanel):
                 line = line.strip()
                 if line and len(line) > 2:  # Skip very short lines
                     lines.append(line)
-
             clean_text = '\n'.join(lines)
 
             # Build context
@@ -2381,7 +2885,6 @@ CONTENT:
 {'[Content truncated - showing first 3000 characters]' if len(clean_text) > 3000 else '[End of content]'}"""
 
             return context
-
         except ImportError:
             # Fallback without BeautifulSoup
             import re
@@ -2399,7 +2902,6 @@ CONTENT:
 {'[Content truncated]' if len(text) > 3000 else '[End]'}"""
         except Exception as e:
             return f"Error extracting text: {str(e)}"
-
     def get_current_context(self):
         """DEPRECATED - Now using context_display directly"""
         # This function is kept for compatibility but no longer used

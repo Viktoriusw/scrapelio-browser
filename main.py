@@ -47,7 +47,6 @@ def _configure_tor_proxy_if_needed():
                 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = ""
             _logger.debug("[TOR] tor.enabled=false, omitiendo proxy")
             return
-
         from tor_manager import TorManager
         tm = TorManager()
         socks_port = config.get("tor.socks_port", 9150)
@@ -61,7 +60,6 @@ def _configure_tor_proxy_if_needed():
             config.set_tor_enabled(False)
             config.persist_config()
             return
-
         # CRÍTICO: NO usar QTWEBENGINE_CHROMIUM_FLAGS — sobrescribe webEngineArgs y
         # host-resolver-rules tiene espacios que se dividen mal. Usar SOLO sys.argv.
         # Formato Chromium: MAP * ^NOTFOUND bloquea DNS local; EXCLUDE 127.0.0.1 permite
@@ -109,7 +107,6 @@ class BookmarkListener(Thread):
         self.server_socket.listen(1)
         self._stop_event = Event()
         self.daemon = True
-
     def run(self):
         while not self._stop_event.is_set():
             try:
@@ -127,7 +124,6 @@ class BookmarkListener(Thread):
             except Exception as e:
                 if not self._stop_event.is_set():
                     _logger.error("Error en BookmarkListener: %s", e, exc_info=True)
-
     def stop(self):
         """Detiene el hilo de escucha de forma segura."""
         self._stop_event.set()
@@ -159,7 +155,6 @@ def main():
         bookmark_listener.start()
     else:
         _logger.warning("NavigationManager no disponible — socket listener desactivado")
-
     window.show()
 
     try:
@@ -170,7 +165,6 @@ def main():
     finally:
         if bookmark_listener:
             bookmark_listener.stop()
-
         sys.exit(exit_code)
 
 

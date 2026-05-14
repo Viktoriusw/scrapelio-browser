@@ -19,7 +19,7 @@ import urllib.parse
 
 class SearchEngine:
     """Representa un motor de búsqueda"""
-    
+
     def __init__(self, id, name, url_template, icon_name=None, suggestions_url=None):
         """
         Args:
@@ -34,12 +34,10 @@ class SearchEngine:
         self.url_template = url_template
         self.icon_name = icon_name
         self.suggestions_url = suggestions_url
-    
     def get_search_url(self, query):
         """Generar URL de búsqueda para una consulta"""
         encoded_query = urllib.parse.quote(query)
         return self.url_template.replace("{query}", encoded_query)
-    
     def to_dict(self):
         """Convertir a diccionario para serialización"""
         return {
@@ -49,7 +47,6 @@ class SearchEngine:
             'icon_name': self.icon_name,
             'suggestions_url': self.suggestions_url
         }
-    
     @staticmethod
     def from_dict(data):
         """Crear desde diccionario"""
@@ -64,10 +61,10 @@ class SearchEngine:
 
 class SearchEngineManager(QObject):
     """Gestor de motores de búsqueda"""
-    
+
     # Señal emitida cuando cambia el motor predeterminado
     default_engine_changed = Signal(str)  # engine_id
-    
+
     # Motores de búsqueda predefinidos
     PREDEFINED_ENGINES = [
         SearchEngine(
@@ -122,24 +119,22 @@ class SearchEngineManager(QObject):
             icon_name='stackoverflow.png'
         )
     ]
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.settings = QSettings("Scrapelio", "SearchEngines")
         self.engines = {}
         self.default_engine_id = None
-        
+
         # Cargar motores predefinidos
         self._load_predefined_engines()
-        
+
         # Cargar configuración
         self.load_settings()
-    
     def _load_predefined_engines(self):
         """Cargar motores de búsqueda predefinidos"""
         for engine in self.PREDEFINED_ENGINES:
             self.engines[engine.id] = engine
-    
     def load_settings(self):
         """Cargar configuración guardada"""
         # Cargar motor predeterminado
@@ -147,20 +142,17 @@ class SearchEngineManager(QObject):
             "default_engine", 
             "duckduckgo"  # DuckDuckGo por defecto
         )
-        
+
         # Validar que el motor existe
         if self.default_engine_id not in self.engines:
             self.default_engine_id = "duckduckgo"
-    
     def save_settings(self):
         """Guardar configuración"""
         self.settings.setValue("default_engine", self.default_engine_id)
         self.settings.sync()
-    
     def get_default_engine(self):
         """Obtener motor de búsqueda predeterminado"""
         return self.engines.get(self.default_engine_id)
-    
     def set_default_engine(self, engine_id):
         """Establecer motor de búsqueda predeterminado"""
         if engine_id in self.engines:
@@ -169,23 +161,19 @@ class SearchEngineManager(QObject):
             self.default_engine_changed.emit(engine_id)
             return True
         return False
-    
     def get_engine(self, engine_id):
         """Obtener motor de búsqueda por ID"""
         return self.engines.get(engine_id)
-    
     def get_all_engines(self):
         """Obtener lista de todos los motores"""
         return list(self.engines.values())
-    
     def search(self, query, engine_id=None):
         """
         Generar URL de búsqueda
-        
+
         Args:
             query: Texto a buscar
             engine_id: ID del motor (None = usar predeterminado)
-        
         Returns:
             URL de búsqueda
         """
@@ -193,34 +181,28 @@ class SearchEngineManager(QObject):
             engine = self.get_default_engine()
         else:
             engine = self.get_engine(engine_id)
-        
         if engine:
             return engine.get_search_url(query)
-        
         # Fallback a DuckDuckGo
         return f"https://duckduckgo.com/?q={urllib.parse.quote(query)}"
-    
     def is_search_query(self, text):
         """
         Determinar si el texto es una búsqueda o una URL
-        
+
         Returns:
             True si es una búsqueda, False si es una URL
         """
         text = text.strip()
-        
+
         # Si está vacío, no es nada
         if not text:
             return False
-        
         # Si empieza con protocolo, es URL
         if text.startswith(('http://', 'https://', 'file://', 'ftp://')):
             return False
-        
         # Si tiene espacios, probablemente es búsqueda
         if ' ' in text:
             return True
-        
         # Si tiene punto y no tiene espacios, probablemente es URL
         if '.' in text and ' ' not in text:
             # Verificar si tiene extensión de dominio válida
@@ -232,7 +214,6 @@ class SearchEngineManager(QObject):
                               'es', 'de', 'fr', 'it', 'jp', 'cn', 'ru', 'br', 'in']
                 if tld in common_tlds or len(tld) == 2:  # TLD de 2 letras (país)
                     return False
-        
         # Por defecto, considerar como búsqueda
         return True
 
@@ -265,7 +246,6 @@ class SearchEngineButton(QToolButton):
         self.setup_menu()
         self.update_display()
         self.search_manager.default_engine_changed.connect(self.update_display)
-
     def _apply_style(self):
         self.setStyleSheet("""
             QToolButton {
@@ -285,7 +265,6 @@ class SearchEngineButton(QToolButton):
                 width: 0px;
             }
         """)
-
     def setup_menu(self):
         """Configurar menú de motores de búsqueda."""
         menu = QMenu(self)
@@ -317,22 +296,18 @@ class SearchEngineButton(QToolButton):
             action.triggered.connect(
                 lambda checked=False, eid=engine.id: self.select_engine(eid)
             )
-
         menu.addSeparator()
         manage_action = menu.addAction("Gestionar motores...")
         manage_action.triggered.connect(self.show_settings)
         self.setMenu(menu)
-
     def select_engine(self, engine_id: str):
         self.engine_selected.emit(engine_id)
-
     def update_display(self):
         """Actualiza icono y texto con el motor activo."""
         engine = self.search_manager.get_default_engine()
         if engine:
             self.setText(engine.name[:12])
         self._refresh_icon(self._current_icon_color)
-
     def _refresh_icon(self, color: str):
         """Reconstruye el icono search.svg con el color dado."""
         try:
@@ -343,12 +318,10 @@ class SearchEngineButton(QToolButton):
                 self.setIconSize(NAV_ICON_SIZE)
         except Exception:
             pass
-
     def refresh_theme_icon(self, color: str):
         """Llamar externamente cuando cambia el tema para actualizar el color."""
         self._current_icon_color = color
         self._refresh_icon(color)
-
     def show_settings(self):
         dialog = SearchEngineSettingsDialog(self.search_manager, self.parent())
         dialog.exec()
@@ -356,56 +329,52 @@ class SearchEngineButton(QToolButton):
 
 class SearchEngineSettingsDialog(QDialog):
     """Diálogo de configuración de motores de búsqueda"""
-    
+
     def __init__(self, search_manager, parent=None):
         super().__init__(parent)
         self.search_manager = search_manager
-        
+
         self.setWindowTitle("Configuración de motores de búsqueda")
         self.setMinimumSize(500, 400)
-        
+
         self.setup_ui()
-    
     def setup_ui(self):
         """Configurar interfaz"""
         layout = QVBoxLayout(self)
-        
+
         # Título
         title = QLabel("Motores de búsqueda")
         title.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(title)
-        
+
         # Motor predeterminado
         default_layout = QHBoxLayout()
         default_layout.addWidget(QLabel("Motor predeterminado:"))
-        
+
         self.default_combo = QComboBox()
         for engine in self.search_manager.get_all_engines():
             self.default_combo.addItem(engine.name, engine.id)
-        
         # Seleccionar motor actual
         current_engine = self.search_manager.get_default_engine()
         if current_engine:
             index = self.default_combo.findData(current_engine.id)
             if index >= 0:
                 self.default_combo.setCurrentIndex(index)
-        
         self.default_combo.currentIndexChanged.connect(self.on_default_changed)
         default_layout.addWidget(self.default_combo)
         default_layout.addStretch()
-        
+
         layout.addLayout(default_layout)
-        
+
         # Lista de motores disponibles
         layout.addWidget(QLabel("Motores disponibles:"))
-        
+
         self.engines_list = QListWidget()
         for engine in self.search_manager.get_all_engines():
             item_text = f"{engine.name} - {engine.url_template}"
             self.engines_list.addItem(item_text)
-        
         layout.addWidget(self.engines_list)
-        
+
         # Información
         info_label = QLabel(
             "Puedes cambiar el motor predeterminado o usar el selector "
@@ -414,17 +383,16 @@ class SearchEngineSettingsDialog(QDialog):
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
         layout.addWidget(info_label)
-        
+
         # Botones
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
-        
+
         close_btn = QPushButton("Cerrar")
         close_btn.clicked.connect(self.accept)
         buttons_layout.addWidget(close_btn)
-        
+
         layout.addLayout(buttons_layout)
-    
     def on_default_changed(self, index):
         """Cambiar motor predeterminado"""
         engine_id = self.default_combo.itemData(index)

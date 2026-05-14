@@ -27,7 +27,6 @@ class ModernStatusBar(QStatusBar):
         self.ssl_info = {}
 
         self.setup_ui()
-
     def setup_ui(self):
         """Configurar interfaz de usuario"""
         # Widget principal (muestra URLs al hover)
@@ -55,15 +54,12 @@ class ModernStatusBar(QStatusBar):
         # Separador
         separator1 = QLabel("|")
         separator1.setStyleSheet("color: #ccc;")
-
         # Estado de carga
         self.load_label = QLabel("")
         self.load_label.setStyleSheet("font-size: 11px; color: #555;")
-
         # Separador
         separator2 = QLabel("|")
         separator2.setStyleSheet("color: #ccc;")
-
         # Nivel de zoom
         self.zoom_label = QLabel("100%")
         self.zoom_label.setFixedWidth(50)
@@ -89,7 +85,6 @@ class ModernStatusBar(QStatusBar):
                 border: none;
             }
         """)
-
     def update_url_hover(self, url):
         """Actualizar texto cuando el mouse pasa sobre un link"""
         if url:
@@ -98,7 +93,6 @@ class ModernStatusBar(QStatusBar):
             self.status_label.setText(f"🔗 {display_url}")
         else:
             self.status_label.setText("")
-
     def update_ssl_status(self, url_string):
         """Actualizar indicador SSL basado en la URL"""
         self.current_url = url_string
@@ -116,7 +110,6 @@ class ModernStatusBar(QStatusBar):
                 }
             """)
             self.ssl_widget.setToolTip("Conexión segura (HTTPS)\nClick para ver detalles del certificado")
-
         elif url_string.startswith('http://'):
             self.ssl_icon.setText("⚠️")
             self.ssl_text.setText("No seguro")
@@ -130,7 +123,6 @@ class ModernStatusBar(QStatusBar):
                 }
             """)
             self.ssl_widget.setToolTip("Conexión no segura (HTTP)")
-
         elif url_string.startswith('file://'):
             self.ssl_icon.setText("📁")
             self.ssl_text.setText("Local")
@@ -143,16 +135,13 @@ class ModernStatusBar(QStatusBar):
                 }
             """)
             self.ssl_widget.setToolTip("Archivo local")
-
         else:
             self.ssl_icon.setText("")
             self.ssl_text.setText("")
             self.ssl_widget.setToolTip("")
-
     def update_load_status(self, status):
         """Actualizar estado de carga"""
         self.load_label.setText(status)
-
     def update_load_progress(self, progress):
         """Actualizar progreso de carga (0-100)"""
         if progress < 100:
@@ -162,7 +151,6 @@ class ModernStatusBar(QStatusBar):
             # Limpiar después de 2 segundos
             from PySide6.QtCore import QTimer
             QTimer.singleShot(2000, lambda: self.load_label.setText(""))
-
     def update_zoom(self, zoom_factor):
         """Actualizar nivel de zoom"""
         zoom_percent = int(zoom_factor * 100)
@@ -173,20 +161,16 @@ class ModernStatusBar(QStatusBar):
             self.zoom_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #007bff;")
         else:
             self.zoom_label.setStyleSheet("font-size: 11px; font-weight: bold;")
-
         self.zoom_label.setToolTip(f"Zoom: {zoom_percent}%\nClick para restablecer a 100%")
-
     def reset_zoom_on_click(self, event):
         """Restablecer zoom al hacer click en el indicador"""
         # Emitir señal para que el navegador restablezca el zoom
         if hasattr(self.parent(), 'zoom_reset'):
             self.parent().zoom_reset()
-
     def show_ssl_info(self, event):
         """Mostrar información del certificado SSL"""
         if not self.current_url.startswith('https://'):
             return
-
         # Extraer dominio
         url = QUrl(self.current_url)
         host = url.host()
@@ -215,7 +199,6 @@ class ModernStatusBar(QStatusBar):
         msg.setText(info_text)
         msg.setIcon(QMessageBox.Information)
         msg.exec()
-
     def show_message(self, message, timeout=3000):
         """Mostrar mensaje temporal en la status bar"""
         self.showMessage(message, timeout)
@@ -260,14 +243,11 @@ class NavbarLoadingBar(QFrame):
         self._fade_anim = QPropertyAnimation(self._opacity, b"opacity")
         self._fade_anim.setDuration(300)
         self._fade_anim.finished.connect(self.hide)
-
     def _get_progress(self) -> int:
         return self._progress
-
     def _set_progress(self, value: int):
         self._progress = value
         self._update_width()
-
     _bar_progress = property(_get_progress, _set_progress)  # type: ignore
 
     def _update_width(self):
@@ -276,11 +256,9 @@ class NavbarLoadingBar(QFrame):
             total = parent.width()
             w = int(total * self._progress / 100)
             self.setFixedWidth(max(0, w))
-
     def resizeEvent(self, event):
         self._update_width()
         super().resizeEvent(event)
-
     # ── API pública ────────────────────────────────────────────────────────────
 
     def on_load_started(self):
@@ -291,23 +269,19 @@ class NavbarLoadingBar(QFrame):
         self.show()
         self.raise_()
         self._animate_to(15)  # Arranque inmediato hasta 15%
-
     def on_load_progress(self, progress: int):
         """Llamar con el progreso de carga 0-100 (loadProgress signal)."""
         self._animate_to(min(95, progress))  # No llegar a 100 hasta finish
-
     def on_load_finished(self, ok: bool):
         """Llamar cuando termina la carga (loadFinished signal)."""
         self._animate_to(100)
         # Fade out tras 300ms
         QTimer.singleShot(300, self._fade_out)
-
     def _animate_to(self, target: int):
         self._prog_anim.stop()
         self._prog_anim.setStartValue(self._progress)
         self._prog_anim.setEndValue(target)
         self._prog_anim.start()
-
     def _fade_out(self):
         self._fade_anim.setStartValue(1.0)
         self._fade_anim.setEndValue(0.0)

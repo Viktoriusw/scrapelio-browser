@@ -35,7 +35,6 @@ class ScreenshotTool:
         self.parent = parent
         self.full_page_image = None
         self.capture_in_progress = False
-
     def show_screenshot_dialog(self):
         """Mostrar diálogo de opciones de captura"""
         if not self.browser:
@@ -45,20 +44,16 @@ class ScreenshotTool:
                 "No hay ninguna página activa para capturar."
             )
             return
-
         dialog = ScreenshotDialog(self.browser, self.parent)
         dialog.screenshot_captured.connect(self.on_screenshot_captured)
         dialog.exec()
-
     def capture_visible_area(self):
         """Capturar solo el área visible de la página"""
         if not self.browser:
             return None
-
         # Capturar el widget completo
         pixmap = self.browser.grab()
         return pixmap.toImage()
-
     def capture_full_page(self, callback=None):
         """
         Capturar página completa con scroll automático
@@ -68,7 +63,6 @@ class ScreenshotTool:
         """
         if not self.browser or self.capture_in_progress:
             return
-
         self.capture_in_progress = True
         self.capture_callback = callback
 
@@ -81,13 +75,11 @@ class ScreenshotTool:
                 clientWidth: window.innerWidth
             })
         """, self._on_page_dimensions_received)
-
     def _on_page_dimensions_received(self, dimensions):
         """Callback cuando se reciben las dimensiones de la página"""
         if not dimensions:
             self.capture_in_progress = False
             return
-
         page_height = dimensions['scrollHeight']
         page_width = dimensions['scrollWidth']
         viewport_height = dimensions['clientHeight']
@@ -117,18 +109,15 @@ class ScreenshotTool:
 
         # Iniciar captura por scroll
         self._capture_next_section()
-
     def _capture_next_section(self):
         """Capturar la siguiente sección de la página"""
         if self.current_scroll_y >= self.page_height:
             # Terminado - combinar todas las capturas
             self._combine_captures()
             return
-
         if self.progress_dialog.wasCanceled():
             self._cancel_full_page_capture()
             return
-
         # Scroll a la posición actual
         js_code = f"window.scrollTo(0, {self.current_scroll_y});"
         self.browser.page().runJavaScript(js_code)
@@ -138,7 +127,6 @@ class ScreenshotTool:
 
         # Esperar un poco para que se renderice y luego capturar
         QTimer.singleShot(200, self._capture_current_viewport)
-
     def _capture_current_viewport(self):
         """Capturar el viewport actual"""
         # Capturar área visible
@@ -156,13 +144,11 @@ class ScreenshotTool:
 
         # Continuar con la siguiente sección
         QTimer.singleShot(100, self._capture_next_section)
-
     def _combine_captures(self):
         """Combinar todas las capturas en una sola imagen"""
         if not self.captures:
             self._cancel_full_page_capture()
             return
-
         # Crear painter para dibujar en la imagen completa
         painter = QPainter(self.full_page_image)
 
@@ -171,7 +157,6 @@ class ScreenshotTool:
             y_pos = capture['y_position']
             image = capture['image']
             painter.drawImage(0, y_pos, image)
-
         painter.end()
 
         # Limpiar
@@ -185,7 +170,6 @@ class ScreenshotTool:
         # Llamar callback con la imagen completa
         if self.capture_callback:
             self.capture_callback(self.full_page_image)
-
     def _cancel_full_page_capture(self):
         """Cancelar captura de página completa"""
         self.capture_in_progress = False
@@ -195,7 +179,6 @@ class ScreenshotTool:
         # Restaurar scroll
         if self.browser:
             self.browser.page().runJavaScript("window.scrollTo(0, 0);")
-
     def save_image(self, image, suggested_filename=None):
         """
         Guardar imagen en disco
@@ -206,13 +189,11 @@ class ScreenshotTool:
         """
         if not image:
             return False
-
         # Generar nombre por defecto si no se proporciona
         if not suggested_filename:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             current_url = self.browser.url().host() if self.browser else "screenshot"
             suggested_filename = f"screenshot_{current_url}_{timestamp}.png"
-
         # Diálogo para guardar
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self.parent,
@@ -230,7 +211,6 @@ class ScreenshotTool:
             if ext in ['.jpg', '.jpeg']:
                 format_str = "JPEG"
                 quality = 95  # Alta calidad para JPEG
-
             # Guardar imagen
             success = image.save(file_path, format_str, quality)
 
@@ -248,9 +228,7 @@ class ScreenshotTool:
                     "No se pudo guardar la captura de pantalla."
                 )
                 return False
-
         return False
-
     def copy_to_clipboard(self, image):
         """
         Copiar imagen al portapapeles
@@ -260,7 +238,6 @@ class ScreenshotTool:
         """
         if not image:
             return False
-
         clipboard = QApplication.clipboard()
         pixmap = QPixmap.fromImage(image)
         clipboard.setPixmap(pixmap)
@@ -271,7 +248,6 @@ class ScreenshotTool:
             "La captura de pantalla se copió al portapapeles."
         )
         return True
-
     def on_screenshot_captured(self, image):
         """Callback cuando se captura una screenshot desde el diálogo"""
         # Este método se puede usar para procesar la imagen si es necesario
@@ -295,7 +271,6 @@ class ScreenshotDialog(QDialog):
         self.setMinimumWidth(400)
 
         self.setup_ui()
-
     def setup_ui(self):
         """Configurar interfaz del diálogo"""
         layout = QVBoxLayout(self)
@@ -372,7 +347,6 @@ class ScreenshotDialog(QDialog):
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
         layout.addWidget(info_label)
-
     def perform_capture(self):
         """Realizar la captura según las opciones seleccionadas"""
         if self.visible_radio.isChecked():
@@ -385,7 +359,6 @@ class ScreenshotDialog(QDialog):
             self.capture_btn.setEnabled(False)
             self.capture_btn.setText("Capturando...")
             self.screenshot_tool.capture_full_page(self.on_full_page_captured)
-
     def on_full_page_captured(self, image):
         """Callback cuando termina la captura de página completa"""
         self.capture_btn.setEnabled(True)
@@ -393,22 +366,18 @@ class ScreenshotDialog(QDialog):
 
         if image:
             self.process_captured_image(image)
-
     def process_captured_image(self, image):
         """Procesar imagen capturada según opciones"""
         if not image:
             return
-
         self.captured_image = image
 
         # Guardar en archivo si está marcado
         if self.save_file_check.isChecked():
             self.screenshot_tool.save_image(image)
-
         # Copiar al portapapeles si está marcado
         if self.copy_clipboard_check.isChecked():
             self.screenshot_tool.copy_to_clipboard(image)
-
         # Emitir señal
         self.screenshot_captured.emit(image)
 

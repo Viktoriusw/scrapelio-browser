@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Archivos de usuario
+bookmarks.db
+passwords.db
+history.db
+
+# Configuración (puede contener URLs internas o secret keys)
+config.yaml
+local_config.yaml
+.env
+scrapelio.config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+

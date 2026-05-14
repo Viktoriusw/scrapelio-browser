@@ -23,7 +23,6 @@ class ColorButton(QPushButton):
         self.setFixedSize(40, 30)
         self.update_color()
         self.clicked.connect(self.choose_color)
-
     def update_color(self):
         """Actualizar color visual del botón"""
         self.setStyleSheet(f"""
@@ -36,7 +35,6 @@ class ColorButton(QPushButton):
                 border: 2px solid #666;
             }}
         """)
-
     def choose_color(self):
         """Abrir selector de color"""
         color = QColorDialog.getColor(QColor(self._color), self, "Select Group Color")
@@ -44,11 +42,9 @@ class ColorButton(QPushButton):
             self._color = color.name()
             self.update_color()
             self.colorChanged.emit(self._color)
-
     def get_color(self):
         """Obtener color actual"""
         return self._color
-
     def set_color(self, color):
         """Establecer color"""
         self._color = color
@@ -66,7 +62,6 @@ class CreateGroupDialog(QDialog):
         self.setMinimumWidth(400)
 
         self.setup_ui()
-
     def setup_ui(self):
         """Configurar interfaz"""
         layout = QVBoxLayout(self)
@@ -81,7 +76,6 @@ class CreateGroupDialog(QDialog):
             self.name_input.setText(self.group.name)
         else:
             self.name_input.setText("")
-
         name_layout.addWidget(self.name_input)
         layout.addLayout(name_layout)
 
@@ -92,7 +86,6 @@ class CreateGroupDialog(QDialog):
         self.color_button = ColorButton()
         if self.group:
             self.color_button.set_color(self.group.color)
-
         color_layout.addWidget(self.color_button)
 
         # Colores predefinidos
@@ -111,7 +104,6 @@ class CreateGroupDialog(QDialog):
             """)
             preset_btn.clicked.connect(lambda checked, c=color: self.color_button.set_color(c))
             color_layout.addWidget(preset_btn)
-
         color_layout.addStretch()
         layout.addLayout(color_layout)
 
@@ -120,7 +112,6 @@ class CreateGroupDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-
     def get_group_data(self):
         """Obtener datos del grupo"""
         return {
@@ -145,7 +136,6 @@ class TabGroupWidget(QFrame):
         self.setLineWidth(2)
         self.setup_ui()
         self.update_style()
-
     def setup_ui(self):
         """Configurar interfaz del widget"""
         layout = QHBoxLayout(self)
@@ -202,7 +192,6 @@ class TabGroupWidget(QFrame):
         delete_btn.setToolTip("Delete group")
         delete_btn.clicked.connect(lambda: self.deleteRequested.emit(self.group.id))
         layout.addWidget(delete_btn)
-
     def update_style(self):
         """Actualizar estilo del widget"""
         self.setStyleSheet(f"""
@@ -215,7 +204,6 @@ class TabGroupWidget(QFrame):
                 background-color: rgba(0, 0, 0, 0.05);
             }}
         """)
-
     def update_group(self, group: TabGroup):
         """Actualizar datos del grupo"""
         self.group = group
@@ -243,7 +231,6 @@ class TabGroupsPanel(QWidget):
         self.setup_ui()
         self.connect_signals()
         self.refresh_groups()
-
     def setup_ui(self):
         """Configurar interfaz"""
         layout = QVBoxLayout(self)
@@ -301,7 +288,6 @@ class TabGroupsPanel(QWidget):
         footer_layout.addWidget(clear_all_btn)
 
         layout.addWidget(footer)
-
     def connect_signals(self):
         """Conectar señales del group manager"""
         self.group_manager.group_created.connect(self.on_group_created)
@@ -314,7 +300,6 @@ class TabGroupsPanel(QWidget):
         self.group_manager.tab_removed_from_group.connect(
             lambda group_id, tab_index: self.on_group_updated(group_id)
         )
-
     def create_group(self):
         """Crear nuevo grupo"""
         dialog = CreateGroupDialog(parent=self)
@@ -323,33 +308,28 @@ class TabGroupsPanel(QWidget):
             if not data["name"]:
                 QMessageBox.warning(self, "Error", "Please enter a group name")
                 return
-
             group = self.group_manager.create_group(
                 name=data["name"],
                 color=data["color"]
             )
 
             QMessageBox.information(self, "Success", f"Group '{group.name}' created!")
-
     def create_group_from_selected(self):
         """Crear grupo con las pestañas seleccionadas"""
         if not self.tab_manager:
             QMessageBox.warning(self, "Error", "Tab manager not available")
             return
-
         # Obtener pestaña actual
         current_index = self.tab_manager.tabs.currentIndex()
         if current_index < 0:
             QMessageBox.warning(self, "Error", "No tab selected")
             return
-
         dialog = CreateGroupDialog(parent=self)
         if dialog.exec() == QDialog.Accepted:
             data = dialog.get_group_data()
             if not data["name"]:
                 QMessageBox.warning(self, "Error", "Please enter a group name")
                 return
-
             # Crear grupo con la pestaña actual
             group = self.group_manager.create_group(
                 name=data["name"],
@@ -359,28 +339,23 @@ class TabGroupsPanel(QWidget):
 
             QMessageBox.information(self, "Success",
                                   f"Group '{group.name}' created with 1 tab!")
-
     def edit_group(self, group_id: str):
         """Editar grupo existente"""
         group = self.group_manager.get_group(group_id)
         if not group:
             return
-
         dialog = CreateGroupDialog(group=group, parent=self)
         if dialog.exec() == QDialog.Accepted:
             data = dialog.get_group_data()
 
             if data["name"]:
                 self.group_manager.rename_group(group_id, data["name"])
-
             self.group_manager.change_group_color(group_id, data["color"])
-
     def delete_group(self, group_id: str):
         """Eliminar grupo"""
         group = self.group_manager.get_group(group_id)
         if not group:
             return
-
         reply = QMessageBox.question(
             self, "Confirm Delete",
             f"Delete group '{group.name}'?\n\nTabs will not be closed, only ungrouped.",
@@ -389,30 +364,24 @@ class TabGroupsPanel(QWidget):
 
         if reply == QMessageBox.Yes:
             self.group_manager.delete_group(group_id)
-
     def view_group_tabs(self, group_id: str):
         """Ver pestañas del grupo"""
         group = self.group_manager.get_group(group_id)
         if not group or not self.tab_manager:
             return
-
         tabs_info = []
         for idx in sorted(group.tab_indices):
             if idx < self.tab_manager.tabs.count():
                 title = self.tab_manager.tabs.tabText(idx)
                 tabs_info.append(f"  • Tab {idx + 1}: {title}")
-
         if tabs_info:
             msg = f"Tabs in group '{group.name}':\n\n" + "\n".join(tabs_info)
         else:
             msg = f"No tabs in group '{group.name}'"
-
         QMessageBox.information(self, f"Group: {group.name}", msg)
-
     def toggle_collapse(self, group_id: str):
         """Colapsar/expandir grupo"""
         self.group_manager.toggle_group_collapse(group_id)
-
     def refresh_groups(self):
         """Refrescar lista de grupos"""
         # Limpiar widgets existentes
@@ -420,7 +389,6 @@ class TabGroupsPanel(QWidget):
             item = self.groups_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-
         # Obtener grupos
         groups = self.group_manager.get_all_groups()
 
@@ -431,7 +399,6 @@ class TabGroupsPanel(QWidget):
             self.groups_layout.addWidget(no_groups_label)
             self.info_label.setText("No groups")
             return
-
         # Crear widgets para cada grupo
         for group in groups:
             widget = TabGroupWidget(group)
@@ -440,11 +407,9 @@ class TabGroupsPanel(QWidget):
             widget.tabsRequested.connect(self.view_group_tabs)
             widget.collapseToggled.connect(self.toggle_collapse)
             self.groups_layout.addWidget(widget)
-
         # Actualizar info
         total_tabs = sum(len(g.tab_indices) for g in groups)
         self.info_label.setText(f"{len(groups)} groups • {total_tabs} tabs grouped")
-
     def clear_all_groups(self):
         """Limpiar todos los grupos"""
         reply = QMessageBox.question(
@@ -456,15 +421,12 @@ class TabGroupsPanel(QWidget):
         if reply == QMessageBox.Yes:
             self.group_manager.clear_all_groups()
             self.refresh_groups()
-
     def on_group_created(self, group_id: str):
         """Callback: grupo creado"""
         self.refresh_groups()
-
     def on_group_deleted(self, group_id: str):
         """Callback: grupo eliminado"""
         self.refresh_groups()
-
     def on_group_updated(self, group_id: str):
         """Callback: grupo actualizado"""
         self.refresh_groups()

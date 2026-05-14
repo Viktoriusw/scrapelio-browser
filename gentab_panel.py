@@ -18,7 +18,11 @@ from PySide6.QtCore import Qt, QTimer, QSettings, QSize, Signal
 from PySide6.QtGui import QFont, QColor, QIcon
 
 from base_panel import BasePanel
-from llm_client import LLMClient, LLMConfig, PROVIDER_LOCAL, PROVIDER_LLMAPI, LLMAPI_FREE_MODELS
+from llm_client import (
+    LLMClient, LLMConfig, PROVIDER_LOCAL, PROVIDER_LLMAPI, PROVIDER_ANTHROPIC,
+    PROVIDER_HUGGINGFACE, LLMAPI_FREE_MODELS, ANTHROPIC_MODELS,
+    ANTHROPIC_DEFAULT_MODEL, HUGGINGFACE_MODELS, HUGGINGFACE_DEFAULT_MODEL,
+)
 from gentab_engine import GenTabEngine, TabContext, GenTabResult, GenTabStatus
 
 
@@ -36,7 +40,6 @@ class TabContextCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self._setup_ui()
         self._apply_style()
-
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
@@ -77,49 +80,59 @@ class TabContextCard(QFrame):
             self.size_label = QLabel("pendiente")
         self.size_label.setObjectName("cardSize")
         layout.addWidget(self.size_label)
-
     def _apply_style(self):
-        self.setStyleSheet("""
-            QFrame#tabContextCard {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #1e1b4b, stop:1 #312e81);
-                border: 1px solid rgba(99, 102, 241, 0.3);
+        try:
+            from ui.core.theme_engine import get_theme_engine
+            te = get_theme_engine()
+            data = te.get_theme_data() if te else {}
+            colors = data.get("colors", {})
+            bg = colors.get("surface", "#313244")
+            bg_hover = colors.get("hover", "#45475a")
+            border = colors.get("border", "rgba(255,255,255,0.1)")
+            accent = colors.get("accent", "#89b4fa")
+            primary = colors.get("primary", "#e2e8f0")
+            secondary = colors.get("secondary", "#94a3b8")
+        except Exception:
+            bg, bg_hover = "#313244", "#45475a"
+            border, accent = "rgba(255,255,255,0.1)", "#89b4fa"
+            primary, secondary = "#e2e8f0", "#94a3b8"
+        self.setStyleSheet(f"""
+            QFrame#tabContextCard {{
+                background: {bg};
+                border: 1px solid {border};
                 border-radius: 10px;
                 min-height: 48px;
-            }
-            QFrame#tabContextCard:hover {
-                border-color: rgba(99, 102, 241, 0.7);
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #252262, stop:1 #3b3791);
-            }
-            QLabel#cardTitle { color: #e2e8f0; font-size: 13px; }
-            QLabel#cardDomain { color: #94a3b8; font-size: 11px; }
-            QLabel#cardSize {
-                color: #818cf8; font-size: 11px; font-weight: bold;
-                background: rgba(99, 102, 241, 0.15);
-                padding: 2px 8px; border-radius: 8px;
-            }
-            QCheckBox { spacing: 4px; }
-            QCheckBox::indicator {
-                width: 16px; height: 16px; border-radius: 4px;
-                border: 2px solid #6366f1;
-            }
-            QCheckBox::indicator:checked {
-                background: #6366f1;
-                image: none;
-            }
-            QCheckBox::indicator:unchecked {
+            }}
+            QFrame#tabContextCard:hover {{
+                border-color: {accent};
+                background: {bg_hover};
+            }}
+            QLabel#cardTitle {{ color: {primary}; font-size: 13px; }}
+            QLabel#cardDomain {{ color: {secondary}; font-size: 11px; }}
+            QLabel#cardSize {{
+                color: {accent}; font-size: 11px; font-weight: bold;
                 background: transparent;
-            }
+                padding: 2px 8px; border-radius: 8px;
+            }}
+            QCheckBox {{ spacing: 4px; }}
+            QCheckBox::indicator {{
+                width: 16px; height: 16px; border-radius: 4px;
+                border: 2px solid {accent};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {accent};
+                image: none;
+            }}
+            QCheckBox::indicator:unchecked {{
+                background: transparent;
+            }}
         """)
-
     def _on_toggle(self, checked):
         self.selected = checked
         self.setProperty("selected", checked)
         opacity = "1.0" if checked else "0.4"
         self.setStyleSheet(self.styleSheet())
         self.toggled.emit(self.tab_context.index, checked)
-
     def update_content_size(self, size: int):
         self.tab_context.content_length = size
         if size > 1000:
@@ -154,17 +167,14 @@ class GenTabPanel(BasePanel):
         self.engine.gentab_error.connect(self._on_generation_error)
 
         self._load_settings()
-
     def get_tab_definitions(self):
         return [
             (self.create_main_tab, "✨ GenTab"),
             (self.create_settings_tab, "⚙️ Config"),
             (self.create_history_tab, "📜 Historial"),
         ]
-
     def post_setup_ui(self):
         self.set_object_name("genTabPanel")
-
     def create_main_tab(self):
         widget = QWidget()
         widget.setObjectName("genTabMain")
@@ -320,7 +330,6 @@ class GenTabPanel(BasePanel):
 
         self._apply_main_styles(widget)
         return widget
-
     def create_settings_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -336,10 +345,12 @@ class GenTabPanel(BasePanel):
         self.provider_combo = QComboBox()
         self.provider_combo.addItem("🖥️ LM Studio / Local", PROVIDER_LOCAL)
         self.provider_combo.addItem("☁️ llmapi.ai (cloud gratuito)", PROVIDER_LLMAPI)
+        self.provider_combo.addItem("🤖 Anthropic (Claude)", PROVIDER_ANTHROPIC)
+        self.provider_combo.addItem("🤗 HuggingFace (Inference API)", PROVIDER_HUGGINGFACE)
         prov_row.addWidget(self.provider_combo)
         prov_layout.addLayout(prov_row)
 
-        # LM Studio URL (solo visible en modo local)
+        # ── LM Studio / Local ─────────────────────────────────────────────────
         self.local_url_widget = QWidget()
         local_url_layout = QHBoxLayout(self.local_url_widget)
         local_url_layout.setContentsMargins(0, 0, 0, 0)
@@ -350,7 +361,7 @@ class GenTabPanel(BasePanel):
         local_url_layout.addWidget(self.server_url_input)
         prov_layout.addWidget(self.local_url_widget)
 
-        # llmapi.ai (solo visible en modo cloud)
+        # ── llmapi.ai ─────────────────────────────────────────────────────────
         self.cloud_widget = QWidget()
         cloud_layout = QVBoxLayout(self.cloud_widget)
         cloud_layout.setContentsMargins(0, 0, 0, 0)
@@ -389,7 +400,136 @@ class GenTabPanel(BasePanel):
         cloud_layout.addWidget(info_cloud)
         prov_layout.addWidget(self.cloud_widget)
 
-        # Estado y botones
+        # ── Anthropic (Claude) ────────────────────────────────────────────────
+        self.anthropic_widget = QWidget()
+        ant_layout = QVBoxLayout(self.anthropic_widget)
+        ant_layout.setContentsMargins(0, 0, 0, 0)
+        ant_layout.setSpacing(6)
+
+        ant_key_row = QHBoxLayout()
+        ant_key_lbl = QLabel("API Key:")
+        ant_key_lbl.setFixedWidth(72)
+        ant_key_row.addWidget(ant_key_lbl)
+        self.anthropic_key_input = QLineEdit()
+        self.anthropic_key_input.setPlaceholderText("sk-ant-api03-...")
+        self.anthropic_key_input.setEchoMode(QLineEdit.Password)
+        ant_key_row.addWidget(self.anthropic_key_input)
+        ant_show_btn = QPushButton("👁")
+        ant_show_btn.setMaximumWidth(32)
+        ant_show_btn.setCheckable(True)
+        ant_show_btn.toggled.connect(
+            lambda on: self.anthropic_key_input.setEchoMode(
+                QLineEdit.Normal if on else QLineEdit.Password
+            )
+        )
+        ant_key_row.addWidget(ant_show_btn)
+        ant_layout.addLayout(ant_key_row)
+
+        ant_model_row = QHBoxLayout()
+        ant_model_lbl = QLabel("Modelo:")
+        ant_model_lbl.setFixedWidth(72)
+        ant_model_row.addWidget(ant_model_lbl)
+        self.anthropic_model_combo = QComboBox()
+        _ant_model_groups = [
+            ("── Claude 4 ──", []),
+            (None, ["claude-opus-4-5", "claude-sonnet-4-5"]),
+            ("── Claude 3.7 ──", []),
+            (None, ["claude-sonnet-3-7"]),
+            ("── Claude 3.5 ──", []),
+            (None, ["claude-sonnet-3-5", "claude-haiku-3-5"]),
+            ("── Claude 3 (legacy) ──", []),
+            (None, ["claude-opus-3", "claude-sonnet-3", "claude-haiku-3"]),
+        ]
+        for header, models_in_group in _ant_model_groups:
+            if header is not None:
+                self.anthropic_model_combo.addItem(header)
+                idx = self.anthropic_model_combo.count() - 1
+                item = self.anthropic_model_combo.model().item(idx)
+                if item:
+                    item.setEnabled(False)
+                    item.setForeground(QColor("#606060"))
+            else:
+                for model in models_in_group:
+                    self.anthropic_model_combo.addItem(model)
+        ant_model_row.addWidget(self.anthropic_model_combo)
+        ant_layout.addLayout(ant_model_row)
+
+        self.anthropic_model_desc = QLabel("")
+        self.anthropic_model_desc.setWordWrap(True)
+        self.anthropic_model_desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        ant_layout.addWidget(self.anthropic_model_desc)
+        self.anthropic_model_combo.currentTextChanged.connect(self._update_anthropic_model_desc)
+
+        ant_info = QLabel(
+            '🔑 Obtén tu API key en '
+            '<a href="https://console.anthropic.com/settings/keys" '
+            'style="color:#818cf8;">console.anthropic.com</a>'
+        )
+        ant_info.setOpenExternalLinks(True)
+        ant_info.setTextFormat(Qt.RichText)
+        ant_info.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        ant_layout.addWidget(ant_info)
+
+        prov_layout.addWidget(self.anthropic_widget)
+
+        # ── HuggingFace (Inference API) ───────────────────────────────────────
+        self.hf_widget = QWidget()
+        hf_layout = QVBoxLayout(self.hf_widget)
+        hf_layout.setContentsMargins(0, 0, 0, 0)
+        hf_layout.setSpacing(6)
+
+        hf_key_row = QHBoxLayout()
+        hf_key_lbl = QLabel("API Key:")
+        hf_key_lbl.setFixedWidth(72)
+        hf_key_row.addWidget(hf_key_lbl)
+        self.hf_key_input = QLineEdit()
+        self.hf_key_input.setPlaceholderText("hf_...")
+        self.hf_key_input.setEchoMode(QLineEdit.Password)
+        hf_key_row.addWidget(self.hf_key_input)
+        hf_show_btn = QPushButton("👁")
+        hf_show_btn.setMaximumWidth(32)
+        hf_show_btn.setCheckable(True)
+        hf_show_btn.toggled.connect(
+            lambda on: self.hf_key_input.setEchoMode(
+                QLineEdit.Normal if on else QLineEdit.Password
+            )
+        )
+        hf_key_row.addWidget(hf_show_btn)
+        hf_layout.addLayout(hf_key_row)
+
+        hf_model_row = QHBoxLayout()
+        hf_model_lbl = QLabel("Modelo:")
+        hf_model_lbl.setFixedWidth(72)
+        hf_model_row.addWidget(hf_model_lbl)
+        self.hf_model_combo = QComboBox()
+        for hf_m in HUGGINGFACE_MODELS:
+            self.hf_model_combo.addItem(hf_m)
+        self.hf_model_combo.setEditable(True)
+        self.hf_model_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.hf_model_combo.setPlaceholderText("organización/nombre-del-modelo")
+        hf_model_row.addWidget(self.hf_model_combo)
+        hf_layout.addLayout(hf_model_row)
+
+        self.hf_model_desc = QLabel("")
+        self.hf_model_desc.setWordWrap(True)
+        self.hf_model_desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        hf_layout.addWidget(self.hf_model_desc)
+        self.hf_model_combo.currentTextChanged.connect(self._update_hf_model_desc)
+
+        hf_info = QLabel(
+            '🔑 Genera tu token en '
+            '<a href="https://huggingface.co/settings/tokens" '
+            'style="color:#818cf8;">huggingface.co/settings/tokens</a>'
+            ' (rol <em>Inference</em>)'
+        )
+        hf_info.setOpenExternalLinks(True)
+        hf_info.setTextFormat(Qt.RichText)
+        hf_info.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        hf_layout.addWidget(hf_info)
+
+        prov_layout.addWidget(self.hf_widget)
+
+        # ── Estado y botones ──────────────────────────────────────────────────
         self.server_status = QLabel("Sin configurar")
         self.server_status.setObjectName("serverStatus")
         prov_layout.addWidget(self.server_status)
@@ -439,10 +579,52 @@ class GenTabPanel(BasePanel):
         # Inicializar UI con valores guardados
         self._populate_settings_ui()
         return widget
+    _ANTHROPIC_MODEL_DESCRIPTIONS = {
+        "claude-opus-4-5":    "Opus 4.5 — el más potente, razonamiento avanzado, 200k ctx",
+        "claude-sonnet-4-5":  "Sonnet 4.5 — balance óptimo inteligencia/velocidad (recomendado)",
+        "claude-sonnet-3-7":  "Sonnet 3.7 — razonamiento híbrido, pensamiento extendido",
+        "claude-sonnet-3-5":  "Sonnet 3.5 — excelente para código y análisis, 200k ctx",
+        "claude-haiku-3-5":   "Haiku 3.5 — el más rápido y económico, ideal para tareas cortas",
+        "claude-opus-3":      "Opus 3 — legacy, máxima inteligencia generación anterior",
+        "claude-sonnet-3":    "Sonnet 3 — legacy, balance generación anterior",
+        "claude-haiku-3":     "Haiku 3 — legacy, el más rápido generación anterior",
+    }
 
+    _HUGGINGFACE_MODEL_DESCRIPTIONS = {
+        "meta-llama/Llama-3.3-70B-Instruct": "Llama 3.3 70B — el más potente de Meta, excelente en razonamiento",
+        "meta-llama/Llama-3.1-8B-Instruct": "Llama 3.1 8B — ligero y rápido, ideal para tareas sencillas",
+        "meta-llama/Llama-3.2-3B-Instruct": "Llama 3.2 3B — ultra-ligero, respuestas muy rápidas",
+        "mistralai/Mistral-7B-Instruct-v0.3": "Mistral 7B — equilibrio rendimiento/velocidad, multilingüe",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1": "Mixtral 8x7B — MoE de alto rendimiento, contexto largo",
+        "mistralai/Mistral-Small-3.1-24B-Instruct-2503": "Mistral Small 3.1 24B — versión reciente, capacidades avanzadas",
+        "Qwen/Qwen2.5-72B-Instruct": "Qwen 2.5 72B — muy potente, destaca en código y matemáticas",
+        "Qwen/Qwen2.5-Coder-32B-Instruct": "Qwen 2.5 Coder 32B — especializado en programación",
+        "deepseek-ai/DeepSeek-R1": "DeepSeek R1 — razonamiento avanzado tipo o1, respuestas largas",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B": "DeepSeek R1 Distill 32B — R1 destilado, más rápido",
+        "google/gemma-2-27b-it": "Gemma 2 27B — modelo de Google, muy capaz en instrucciones",
+        "google/gemma-2-9b-it": "Gemma 2 9B — versión ligera de Gemma, rápida y eficiente",
+        "microsoft/Phi-4-mini-instruct": "Phi-4 Mini — modelo compacto de Microsoft, sorprendentemente capaz",
+    }
+
+    def _update_anthropic_model_desc(self, model_text: str) -> None:
+        """Actualiza la descripción del modelo Anthropic seleccionado."""
+        if hasattr(self, "anthropic_model_desc"):
+            desc = self._ANTHROPIC_MODEL_DESCRIPTIONS.get(model_text, "")
+            self.anthropic_model_desc.setText(desc)
+    def _update_hf_model_desc(self, model_text: str) -> None:
+        """Actualiza la descripción del modelo HuggingFace seleccionado."""
+        if hasattr(self, "hf_model_desc"):
+            desc = self._HUGGINGFACE_MODEL_DESCRIPTIONS.get(model_text, "")
+            self.hf_model_desc.setText(desc)
     def _populate_settings_ui(self):
         """Rellena los controles de settings con los valores de llm_config."""
-        idx = 0 if self.llm_config.provider == PROVIDER_LOCAL else 1
+        _provider_index = {
+            PROVIDER_LOCAL: 0,
+            PROVIDER_LLMAPI: 1,
+            PROVIDER_ANTHROPIC: 2,
+            PROVIDER_HUGGINGFACE: 3,
+        }
+        idx = _provider_index.get(self.llm_config.provider, 0)
         if hasattr(self, "provider_combo"):
             self.provider_combo.setCurrentIndex(idx)
         if hasattr(self, "server_url_input"):
@@ -453,20 +635,44 @@ class GenTabPanel(BasePanel):
             mi = self.llmapi_model_combo.findText(self.llm_config.llmapi_model)
             if mi >= 0:
                 self.llmapi_model_combo.setCurrentIndex(mi)
+        # Anthropic
+        if hasattr(self, "anthropic_key_input"):
+            self.anthropic_key_input.setText(self.llm_config.anthropic_key or "")
+        if hasattr(self, "anthropic_model_combo"):
+            target = self.llm_config.anthropic_model or ANTHROPIC_DEFAULT_MODEL
+            for i in range(self.anthropic_model_combo.count()):
+                item = self.anthropic_model_combo.model().item(i)
+                if item and item.isEnabled() and self.anthropic_model_combo.itemText(i) == target:
+                    self.anthropic_model_combo.setCurrentIndex(i)
+                    break
+            self._update_anthropic_model_desc(self.anthropic_model_combo.currentText())
+        # HuggingFace
+        if hasattr(self, "hf_key_input"):
+            self.hf_key_input.setText(self.llm_config.huggingface_key or "")
+        if hasattr(self, "hf_model_combo"):
+            hf_target = self.llm_config.huggingface_model or HUGGINGFACE_DEFAULT_MODEL
+            hf_mi = self.hf_model_combo.findText(hf_target)
+            if hf_mi >= 0:
+                self.hf_model_combo.setCurrentIndex(hf_mi)
+            else:
+                self.hf_model_combo.setEditText(hf_target)
+            self._update_hf_model_desc(self.hf_model_combo.currentText())
         if hasattr(self, "tokens_spin"):
             self.tokens_spin.setValue(max(4000, int(self.llm_config.max_tokens)))
         self._on_provider_changed()
-
     def _on_provider_changed(self):
         """Muestra/oculta secciones según proveedor seleccionado."""
         if not hasattr(self, "provider_combo"):
             return
-        is_local = self.provider_combo.currentData() == PROVIDER_LOCAL
+        provider = self.provider_combo.currentData()
         if hasattr(self, "local_url_widget"):
-            self.local_url_widget.setVisible(is_local)
+            self.local_url_widget.setVisible(provider == PROVIDER_LOCAL)
         if hasattr(self, "cloud_widget"):
-            self.cloud_widget.setVisible(not is_local)
-
+            self.cloud_widget.setVisible(provider == PROVIDER_LLMAPI)
+        if hasattr(self, "anthropic_widget"):
+            self.anthropic_widget.setVisible(provider == PROVIDER_ANTHROPIC)
+        if hasattr(self, "hf_widget"):
+            self.hf_widget.setVisible(provider == PROVIDER_HUGGINGFACE)
     def create_history_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -488,7 +694,6 @@ class GenTabPanel(BasePanel):
 
         self._refresh_history()
         return widget
-
     # ========================================================================
     # Core Actions
     # ========================================================================
@@ -498,12 +703,10 @@ class GenTabPanel(BasePanel):
         if not hasattr(main_window, 'tab_manager'):
             self._add_error_message("No se puede acceder al gestor de pestañas.")
             return
-
         for i in reversed(range(self.tabs_list_layout.count())):
             item = self.tabs_list_layout.itemAt(i)
             if item and item.widget():
                 item.widget().deleteLater()
-
         self.context_cards.clear()
         self.tab_contexts, _ = self.engine.extract_all_tabs_context(main_window.tab_manager)
 
@@ -512,7 +715,6 @@ class GenTabPanel(BasePanel):
             card.toggled.connect(self._on_tab_toggled)
             self.context_cards.append(card)
             self.tabs_list_layout.insertWidget(self.tabs_list_layout.count() - 1, card)
-
         count = len(self.tab_contexts)
         self.tab_count_label.setText(f"{count} pestaña{'s' if count != 1 else ''}")
         self.extract_btn.setEnabled(count > 0)
@@ -524,22 +726,17 @@ class GenTabPanel(BasePanel):
             )
         else:
             self._add_system_message("No se encontraron pestañas con contenido web.")
-
     def extract_all_content(self):
         if self._extracting:
             return
-
         main_window = self.window()
         if not hasattr(main_window, 'tab_manager'):
             return
-
         selected = [tc for tc in self.tab_contexts
                     if any(c.tab_context.index == tc.index and c.selected for c in self.context_cards)]
-
         if not selected:
             self._add_error_message("Selecciona al menos una pestaña para extraer.")
             return
-
         self._extracting = True
         self._pending_extractions = len(selected)
         self._completed_extractions = 0
@@ -555,7 +752,6 @@ class GenTabPanel(BasePanel):
                 self.engine.extract_tab_html(browser, tc, self._on_tab_extracted)
             else:
                 self._pending_extractions -= 1
-
     def _handle_extraction_timeout(self):
         """Evita bloqueo si alguna pestaña no devuelve HTML a tiempo."""
         if not self._extracting:
@@ -569,7 +765,6 @@ class GenTabPanel(BasePanel):
         self._add_system_message(
             "⏱️ Algunas pestañas tardaron demasiado. Se continuará con el contenido disponible."
         )
-
     def _on_tab_extracted(self, tab_context: TabContext):
         self._completed_extractions += 1
 
@@ -577,7 +772,6 @@ class GenTabPanel(BasePanel):
             if card.tab_context.index == tab_context.index:
                 card.update_content_size(tab_context.content_length)
                 break
-
         if self._completed_extractions >= self._pending_extractions:
             self._extracting = False
             self.extract_btn.setEnabled(True)
@@ -592,13 +786,11 @@ class GenTabPanel(BasePanel):
                 f"<b>{self._completed_extractions}</b> pestañas. "
                 "Ahora describe qué aplicación quieres generar."
             )
-
     def generate_gentab(self):
         prompt = self.prompt_input.toPlainText().strip()
         if not prompt:
             QMessageBox.warning(self, "GenTab", "Escribe una descripción de la aplicación que quieres generar.")
             return
-
         # Asegurar que la config está actualizada antes de generar
         cfg = self.llm_config
         if cfg.provider == PROVIDER_LOCAL and not cfg.local_url:
@@ -607,15 +799,18 @@ class GenTabPanel(BasePanel):
         if cfg.provider == PROVIDER_LLMAPI and not cfg.llmapi_key:
             QMessageBox.warning(self, "GenTab", "Introduce tu API key de llmapi.ai en la pestaña Config.")
             return
-
+        if cfg.provider == PROVIDER_ANTHROPIC and not cfg.anthropic_key:
+            QMessageBox.warning(self, "GenTab", "Introduce tu API key de Anthropic en la pestaña Config (sk-ant-...).")
+            return
+        if cfg.provider == PROVIDER_HUGGINGFACE and not cfg.huggingface_key:
+            QMessageBox.warning(self, "GenTab", "Introduce tu API key de HuggingFace en la pestaña Config (hf_...).")
+            return
         selected = [tc for tc in self.tab_contexts
                     if tc.content and tc.content_length > 0
                     and any(c.tab_context.index == tc.index and c.selected for c in self.context_cards)]
-
         if not selected:
             QMessageBox.warning(self, "GenTab", "Extrae el contenido de al menos una pestaña primero.")
             return
-
         self._add_user_message(prompt)
         self.prompt_input.clear()
 
@@ -628,7 +823,6 @@ class GenTabPanel(BasePanel):
         self.engine.generate_gentab(
             self.server_url, prompt, selected, temperature, max_tokens, llm_config=cfg
         )
-
     # ========================================================================
     # Signal Handlers
     # ========================================================================
@@ -638,10 +832,8 @@ class GenTabPanel(BasePanel):
         self.generate_btn.setText("⏳ Generando...")
         self.progress_bar.show()
         self._set_status("generating", "Generando aplicación...")
-
     def _on_progress(self, message: str):
         self._add_system_message(message)
-
     def _on_generation_complete(self, result: GenTabResult):
         self.generate_btn.setEnabled(True)
         self.generate_btn.setText("✨ Generar GenTab")
@@ -657,17 +849,14 @@ class GenTabPanel(BasePanel):
         )
         self._refresh_history()
         self.gentab_created.emit(result.title, result.html)
-
     def _on_generation_error(self, error: str):
         self.generate_btn.setEnabled(True)
         self.generate_btn.setText("✨ Generar GenTab")
         self.progress_bar.hide()
         self._set_status("error", "Error")
         self._add_error_message(error)
-
     def _on_tab_toggled(self, index: int, checked: bool):
         pass
-
     def _on_quick_action(self, idx: int):
         if idx <= 0:
             return
@@ -681,11 +870,9 @@ class GenTabPanel(BasePanel):
         }
         self.prompt_input.setPlainText(prompts.get(idx, ""))
         self.quick_actions.setCurrentIndex(0)
-
     def _on_url_changed(self, text):
         self.server_url = text.strip()
         self.llm_config.local_url = self.server_url
-
     # ========================================================================
     # UI Message Helpers
     # ========================================================================
@@ -709,7 +896,6 @@ class GenTabPanel(BasePanel):
             body_label.setWordWrap(True)
             body_label.setObjectName("sysMsgBody")
             layout.addWidget(body_label)
-
         frame.setStyleSheet("""
             QFrame#systemMsg {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -721,7 +907,6 @@ class GenTabPanel(BasePanel):
             QLabel#sysMsgBody { color: #94a3b8; font-size: 12px; }
         """)
         return frame
-
     def _add_system_message(self, text: str):
         frame = QFrame()
         frame.setObjectName("sysMsg")
@@ -745,7 +930,6 @@ class GenTabPanel(BasePanel):
         idx = self.messages_layout.count() - 1
         self.messages_layout.insertWidget(idx, frame)
         self._scroll_to_bottom()
-
     def _add_user_message(self, text: str):
         frame = QFrame()
         frame.setObjectName("userMsg")
@@ -773,7 +957,6 @@ class GenTabPanel(BasePanel):
         idx = self.messages_layout.count() - 1
         self.messages_layout.insertWidget(idx, frame)
         self._scroll_to_bottom()
-
     def _add_gentab_message(self, title: str, info: str, result: GenTabResult):
         frame = QFrame()
         frame.setObjectName("gentabMsg")
@@ -835,7 +1018,6 @@ class GenTabPanel(BasePanel):
         idx = self.messages_layout.count() - 1
         self.messages_layout.insertWidget(idx, frame)
         self._scroll_to_bottom()
-
     def _add_error_message(self, text: str):
         frame = QFrame()
         frame.setObjectName("errorMsg")
@@ -857,7 +1039,6 @@ class GenTabPanel(BasePanel):
         idx = self.messages_layout.count() - 1
         self.messages_layout.insertWidget(idx, frame)
         self._scroll_to_bottom()
-
     def _set_status(self, status: str, text: str):
         colors = {
             "ready": "#22c55e",
@@ -873,29 +1054,24 @@ class GenTabPanel(BasePanel):
         self.status_label.setStyleSheet(f"color: {color}; font-size: 12px;")
         if status in ("extracting", "generating"):
             self._start_status_animation(color)
-
     def _start_status_animation(self, color: str):
         if self._status_anim_timer is None:
             self._status_anim_timer = QTimer(self)
             self._status_anim_timer.timeout.connect(lambda: self._tick_status_animation(color))
         self._status_anim_idx = 0
         self._status_anim_timer.start(180)
-
     def _tick_status_animation(self, color: str):
         frame = self._status_anim_frames[self._status_anim_idx % len(self._status_anim_frames)]
         self._status_anim_idx += 1
         self.status_indicator.setText(frame)
         self.status_indicator.setStyleSheet(f"color: {color}; font-size: 16px;")
-
     def _stop_status_animation(self):
         if self._status_anim_timer and self._status_anim_timer.isActive():
             self._status_anim_timer.stop()
-
     def _scroll_to_bottom(self):
         QTimer.singleShot(50, lambda: self.messages_scroll.verticalScrollBar().setValue(
             self.messages_scroll.verticalScrollBar().maximum()
         ))
-
     # ========================================================================
     # Settings & History
     # ========================================================================
@@ -909,7 +1085,6 @@ class GenTabPanel(BasePanel):
             self.llm_config.local_url = old_url
         self.server_url = self.llm_config.local_url
         self._populate_settings_ui()
-
     def _save_settings(self):
         if hasattr(self, "provider_combo"):
             self.llm_config.provider = self.provider_combo.currentData()
@@ -919,13 +1094,28 @@ class GenTabPanel(BasePanel):
             self.llm_config.llmapi_key = self.llmapi_key_input.text().strip()
         if hasattr(self, "llmapi_model_combo"):
             self.llm_config.llmapi_model = self.llmapi_model_combo.currentText()
+        # Guardar configuración Anthropic
+        if hasattr(self, "anthropic_key_input"):
+            self.llm_config.anthropic_key = self.anthropic_key_input.text().strip()
+        if hasattr(self, "anthropic_model_combo"):
+            item = self.anthropic_model_combo.model().item(
+                self.anthropic_model_combo.currentIndex()
+            )
+            if item and item.isEnabled():
+                self.llm_config.anthropic_model = self.anthropic_model_combo.currentText()
+        # Guardar configuración HuggingFace
+        if hasattr(self, "hf_key_input"):
+            self.llm_config.huggingface_key = self.hf_key_input.text().strip()
+        if hasattr(self, "hf_model_combo"):
+            hf_model = self.hf_model_combo.currentText().strip()
+            if hf_model:
+                self.llm_config.huggingface_model = hf_model
         if hasattr(self, "tokens_spin"):
             self.llm_config.max_tokens = self.tokens_spin.value()
         self.llm_config.save("GenTabs")
         # Mantener server_url para compatibilidad con engine
         self.server_url = self.llm_config.local_url
         self._add_system_message("✅ Configuración guardada.")
-
     def _test_connection(self):
         self._save_settings()
         client = LLMClient(self.llm_config)
@@ -936,7 +1126,6 @@ class GenTabPanel(BasePanel):
         else:
             self.server_status.setText(f"❌ {info[:80]}")
             self.server_status.setStyleSheet("color: #ef4444;")
-
     def _refresh_history(self):
         if not hasattr(self, 'history_list'):
             return
@@ -947,152 +1136,81 @@ class GenTabPanel(BasePanel):
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, result)
             self.history_list.addItem(item)
-
     def _clear_history(self):
         self.engine.clear_history()
         self._refresh_history()
-
     # ========================================================================
     # Theme
     # ========================================================================
 
     def _apply_main_styles(self, widget):
-        theme_name = str(QSettings("Scrapelio", "Settings").value("theme", "light")).lower()
-        is_dark = theme_name == "dark"
-
-        if is_dark:
-            widget.setStyleSheet("""
-                QWidget#genTabMain { background: #0f0f23; }
-                QFrame#genTabHeader {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1e1b4b, stop:1 #312e81);
-                    border-bottom: 1px solid rgba(99, 102, 241, 0.3);
-                }
-                QLabel#genTabLogo {
-                    color: white; font-size: 20px; font-weight: bold;
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #a78bfa);
-                    padding: 4px 14px; border-radius: 8px;
-                }
-                QLabel#genTabSubtitle { color: #94a3b8; font-size: 12px; }
-                QLabel#statusDot { font-size: 16px; }
-                QLabel#statusText { font-size: 12px; }
-                QFrame#contextSection {
-                    background: rgba(15, 15, 35, 0.8);
-                    border-bottom: 1px solid rgba(99, 102, 241, 0.15);
-                }
-                QLabel#sectionTitle { color: #c7d2fe; font-size: 13px; font-weight: bold; }
-                QLabel#tabCount {
-                    color: #818cf8; font-size: 12px;
-                    background: rgba(99, 102, 241, 0.12);
-                    padding: 2px 10px; border-radius: 10px;
-                }
-                QPushButton#scanBtn, QPushButton#extractBtn {
-                    background: rgba(99, 102, 241, 0.15);
-                    color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3);
-                    border-radius: 8px; padding: 8px 16px; font-size: 12px;
-                }
-                QPushButton#scanBtn:hover, QPushButton#extractBtn:hover {
-                    background: rgba(99, 102, 241, 0.25);
-                    border-color: rgba(99, 102, 241, 0.5);
-                }
-                QPushButton#generateBtn {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #818cf8);
-                    color: white; border: none; border-radius: 10px;
-                    padding: 12px 24px; font-weight: bold; font-size: 14px; min-height: 20px;
-                }
-                QPushButton#generateBtn:hover {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #818cf8, stop:1 #a5b4fc);
-                }
-                QPushButton#generateBtn:disabled { background: #374151; color: #6b7280; }
-                QFrame#inputFrame { background: #0f0f23; border-top: 1px solid rgba(99, 102, 241, 0.15); }
-                QTextEdit#promptInput {
-                    background: #1a1a3e;
-                    color: #e2e8f0; border: 1px solid rgba(99, 102, 241, 0.3);
-                    border-radius: 10px; padding: 10px; font-size: 13px;
-                    selection-background-color: #6366f1;
-                }
-                QTextEdit#promptInput:focus { border-color: #6366f1; }
-                QComboBox#quickActions {
-                    background: rgba(99, 102, 241, 0.1);
-                    color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3);
-                    border-radius: 8px; padding: 8px 12px; font-size: 12px;
-                }
-                QProgressBar#genTabProgress { background: #1e1b4b; border: none; }
-                QProgressBar#genTabProgress::chunk {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #a78bfa);
-                }
-                QScrollArea { background: transparent; border: none; }
-                QScrollBar:vertical { background: #0f0f23; width: 8px; border: none; }
-                QScrollBar::handle:vertical { background: #374151; border-radius: 4px; min-height: 30px; }
-                QScrollBar::handle:vertical:hover { background: #4b5563; }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            """)
-        else:
-            widget.setStyleSheet("""
-                QWidget#genTabMain { background: #f6f8fc; }
-                QFrame#genTabHeader {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #ffffff, stop:1 #eef2ff);
-                    border-bottom: 1px solid rgba(79, 70, 229, 0.18);
-                }
-                QLabel#genTabLogo {
-                    color: white; font-size: 20px; font-weight: bold;
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5, stop:1 #818cf8);
-                    padding: 4px 14px; border-radius: 8px;
-                }
-                QLabel#genTabSubtitle { color: #64748b; font-size: 12px; }
-                QLabel#statusDot { font-size: 16px; }
-                QLabel#statusText { font-size: 12px; color: #334155; }
-                QFrame#contextSection {
-                    background: rgba(79, 70, 229, 0.06);
-                    border-bottom: 1px solid rgba(79, 70, 229, 0.15);
-                }
-                QLabel#sectionTitle { color: #1f2937; font-size: 13px; font-weight: bold; }
-                QLabel#tabCount {
-                    color: #4f46e5; font-size: 12px;
-                    background: rgba(79, 70, 229, 0.10);
-                    padding: 2px 10px; border-radius: 10px;
-                }
-                QPushButton#scanBtn, QPushButton#extractBtn {
-                    background: rgba(79, 70, 229, 0.10);
-                    color: #4338ca; border: 1px solid rgba(79, 70, 229, 0.25);
-                    border-radius: 8px; padding: 8px 16px; font-size: 12px;
-                }
-                QPushButton#scanBtn:hover, QPushButton#extractBtn:hover {
-                    background: rgba(79, 70, 229, 0.18);
-                    border-color: rgba(79, 70, 229, 0.45);
-                }
-                QPushButton#generateBtn {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5, stop:1 #6366f1);
-                    color: white; border: none; border-radius: 10px;
-                    padding: 12px 24px; font-weight: bold; font-size: 14px; min-height: 20px;
-                }
-                QPushButton#generateBtn:hover {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #818cf8);
-                }
-                QPushButton#generateBtn:disabled { background: #e5e7eb; color: #6b7280; }
-                QFrame#inputFrame { background: #f6f8fc; border-top: 1px solid rgba(79, 70, 229, 0.12); }
-                QTextEdit#promptInput {
-                    background: #ffffff;
-                    color: #1f2937; border: 1px solid rgba(79, 70, 229, 0.22);
-                    border-radius: 10px; padding: 10px; font-size: 13px;
-                    selection-background-color: #4f46e5;
-                }
-                QTextEdit#promptInput:focus { border-color: #4f46e5; }
-                QComboBox#quickActions {
-                    background: rgba(79, 70, 229, 0.08);
-                    color: #1f2937; border: 1px solid rgba(79, 70, 229, 0.2);
-                    border-radius: 8px; padding: 8px 12px; font-size: 12px;
-                }
-                QProgressBar#genTabProgress { background: #e0e7ff; border: none; }
-                QProgressBar#genTabProgress::chunk {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5, stop:1 #818cf8);
-                }
-                QScrollArea { background: transparent; border: none; }
-                QScrollBar:vertical { background: #eef2f7; width: 8px; border: none; }
-                QScrollBar::handle:vertical { background: #cbd5e1; border-radius: 4px; min-height: 30px; }
-                QScrollBar::handle:vertical:hover { background: #94a3b8; }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            """)
-
+        c = self.get_theme_colors()
+        widget.setStyleSheet(f"""
+            QWidget#genTabMain {{ background: {c['surface_0']}; }}
+            QFrame#genTabHeader {{
+                background: {c['surface_1']};
+                border-bottom: 1px solid {c['border']};
+            }}
+            QLabel#genTabLogo {{
+                color: {c['surface_0']}; font-size: 20px; font-weight: bold;
+                background: {c['accent']};
+                padding: 4px 14px; border-radius: 8px;
+            }}
+            QLabel#genTabSubtitle {{ color: {c['text_secondary']}; font-size: 12px; }}
+            QLabel#statusDot {{ font-size: 16px; }}
+            QLabel#statusText {{ font-size: 12px; color: {c['text_secondary']}; }}
+            QFrame#contextSection {{
+                background: {c['surface_1']};
+                border-bottom: 1px solid {c['border']};
+            }}
+            QLabel#sectionTitle {{ color: {c['text_primary']}; font-size: 13px; font-weight: bold; }}
+            QLabel#tabCount {{
+                color: {c['accent']}; font-size: 12px;
+                background: {c['accent_subtle']};
+                padding: 2px 10px; border-radius: 10px;
+            }}
+            QPushButton#scanBtn, QPushButton#extractBtn {{
+                background: {c['surface_1']};
+                color: {c['text_primary']}; border: 1px solid {c['border']};
+                border-radius: 8px; padding: 8px 16px; font-size: 12px;
+            }}
+            QPushButton#scanBtn:hover, QPushButton#extractBtn:hover {{
+                background: {c['surface_hover']};
+                border-color: {c['accent']};
+            }}
+            QPushButton#generateBtn {{
+                background: {c['accent']};
+                color: {c['surface_0']}; border: none; border-radius: 10px;
+                padding: 12px 24px; font-weight: bold; font-size: 14px; min-height: 20px;
+            }}
+            QPushButton#generateBtn:hover {{
+                background: {c['accent_subtle']};
+                color: {c['accent']};
+            }}
+            QPushButton#generateBtn:disabled {{ background: {c['surface_hover']}; color: {c['text_muted']}; }}
+            QFrame#inputFrame {{ background: {c['surface_0']}; border-top: 1px solid {c['border']}; }}
+            QTextEdit#promptInput {{
+                background: {c['input_bg']};
+                color: {c['text_primary']}; border: 1px solid {c['input_border']};
+                border-radius: 10px; padding: 10px; font-size: 13px;
+                selection-background-color: {c['selected']};
+            }}
+            QTextEdit#promptInput:focus {{ border-color: {c['input_focus']}; }}
+            QComboBox#quickActions {{
+                background: {c['surface_1']};
+                color: {c['text_primary']}; border: 1px solid {c['border']};
+                border-radius: 8px; padding: 8px 12px; font-size: 12px;
+            }}
+            QProgressBar#genTabProgress {{ background: {c['surface_1']}; border: none; }}
+            QProgressBar#genTabProgress::chunk {{
+                background: {c['accent']};
+            }}
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{ background: {c['surface_0']}; width: 8px; border: none; }}
+            QScrollBar::handle:vertical {{ background: {c['scroll_handle']}; border-radius: 4px; min-height: 30px; }}
+            QScrollBar::handle:vertical:hover {{ background: {c['scroll_handle_hover']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
     def _on_theme_changed(self, theme_name):
         """Reaplicar estilos del panel cuando cambia el tema global."""
         super()._on_theme_changed(theme_name)

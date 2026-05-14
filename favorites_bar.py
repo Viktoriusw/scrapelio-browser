@@ -24,17 +24,15 @@ def get_favicon_icon(url, favicon_cache=None):
     """
     if favicon_cache is None:
         favicon_cache = {}
-    
     try:
         if url in favicon_cache:
             return favicon_cache[url]
-        
         parsed_url = urlparse(url)
         favicon_url = f"{parsed_url.scheme}://{parsed_url.netloc}/favicon.ico"
-        
+
         # Do not download favicons during initialization to avoid blocking
         # TODO: Implement asynchronous favicon download in the future
-        
+
         # Default favicon
         try:
             default_icon = QIcon("icons/bookmark.svg")
@@ -48,10 +46,8 @@ def get_favicon_icon(url, favicon_cache=None):
             pixmap = QPixmap(16, 16)
             pixmap.fill()
             default_icon = QIcon(pixmap)
-            
         favicon_cache[url] = default_icon
         return default_icon
-        
     except Exception as e:
         logger.error(f"Error getting favicon for URL %s: %s", url, e)
         return QIcon("icons/bookmark.svg")
@@ -66,29 +62,29 @@ def get_favicon_pixmap(url, favicon_cache=None):
 
 class FavoriteDialog(QDialog):
     """Dialog for adding/editing favorites in the bar"""
-    
+
     def __init__(self, parent=None, title="", url="", category="", show_in_bar=True):
         super().__init__(parent)
         self.setWindowTitle("Add to Favorites")
         self.setModal(True)
         self.setMinimumWidth(400)
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Title
         title_layout = QHBoxLayout()
         title_layout.addWidget(QLabel("Title:"))
         self.title_edit = QLineEdit(title)
         title_layout.addWidget(self.title_edit)
         layout.addLayout(title_layout)
-        
+
         # URL
         url_layout = QHBoxLayout()
         url_layout.addWidget(QLabel("URL:"))
         self.url_edit = QLineEdit(url)
         url_layout.addWidget(self.url_edit)
         layout.addLayout(url_layout)
-        
+
         # Category
         category_layout = QHBoxLayout()
         category_layout.addWidget(QLabel("Category:"))
@@ -100,12 +96,12 @@ class FavoriteDialog(QDialog):
                 self.category_combo.setCurrentIndex(index)
         category_layout.addWidget(self.category_combo)
         layout.addLayout(category_layout)
-        
+
         # Show in favorites bar
         self.show_in_bar_check = QCheckBox("Show in favorites bar")
         self.show_in_bar_check.setChecked(show_in_bar)
         layout.addWidget(self.show_in_bar_check)
-        
+
         # Buttons
         button_layout = QHBoxLayout()
         save_button = QPushButton("Save")
@@ -115,7 +111,6 @@ class FavoriteDialog(QDialog):
         button_layout.addWidget(save_button)
         button_layout.addWidget(cancel_button)
         layout.addLayout(button_layout)
-    
     def load_categories(self):
         """Loads available categories"""
         try:
@@ -123,15 +118,13 @@ class FavoriteDialog(QDialog):
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM categories ORDER BY name")
             categories = cursor.fetchall()
-            
+
             self.category_combo.addItem("No category")
             for category in categories:
                 self.category_combo.addItem(category[0])
-            
             conn.close()
         except Exception as e:
             logger.error("Error loading favorite categories from bookmarks.db: %s", e)
-    
     def get_values(self):
         """Gets values from the dialog"""
         return {
@@ -143,14 +136,14 @@ class FavoriteDialog(QDialog):
 
 class FavoritesBar(QToolBar):
     """Favorites bar with complete functionality"""
-    
+
     favorite_clicked = Signal(str)  # Signal when a favorite is clicked
-    
+
     def __init__(self, parent=None):
         super().__init__("Favorites", parent)
         self.setWindowTitle("Favorites Bar")
         self.setVisible(False)  # Initially hidden
-        
+
         # Configure the bar
         self.setMovable(True)
         self.setFloatable(True)
@@ -180,19 +173,18 @@ class FavoritesBar(QToolBar):
                 background-color: rgba(255, 255, 255, 0.12);
             }
         """)
-        
+
         # Favicon cache
         self.favicon_cache = {}
-        
+
         # Load favorites
         self.load_favorites()
-    
     def load_favorites(self):
         """Loads favorites from the database"""
         try:
             conn = sqlite3.connect('bookmarks.db')
             cursor = conn.cursor()
-            
+
             # Get favorites marked for the bar
             cursor.execute("""
                 SELECT title, url, category, notes, tags 
@@ -205,82 +197,75 @@ class FavoritesBar(QToolBar):
                    OR category = 'Barra de Favoritos'
                 ORDER BY title
             """)
-            
+
             favorites = cursor.fetchall()
             conn.close()
-            
+
             # Clear current bar
             self.clear()
-            
+
             # Add favorites to the bar
             for favorite in favorites:
                 title, url, category, notes, tags = favorite
                 self.add_favorite_to_bar(title, url)
-            
             # Add button to add current page
             self.add_add_favorite_action()
-            
         except Exception as e:
             logger.error("Error loading favorites for favorites bar: %s", e)
-    
     def add_favorite_to_bar(self, title, url):
         """Adds a favorite to the bar"""
         try:
             # Get favicon
             icon = self.get_favicon(url)
-            
+
             # Create action
             action = QAction(icon, title, self)
             action.setToolTip(f"{title}\n{url}")
             action.setData(url)
             action.triggered.connect(lambda: self.favorite_clicked.emit(url))
-            
+
             # Add context menu
             action.setMenu(self.create_favorite_menu(title, url))
-            
+
             # Add to bar
             self.addAction(action)
-            
         except Exception as e:
             logger.error("Error adding favorite '%s' (%s) to bar: %s", title, url, e)
-    
     def create_favorite_menu(self, title, url):
         """Creates the context menu for a favorite"""
         menu = QMenu()
-        
+
         # Open
         open_action = menu.addAction("Open")
         open_action.triggered.connect(lambda: self.favorite_clicked.emit(url))
-        
+
         # Open in new tab
         open_new_tab_action = menu.addAction("Open in new tab")
         open_new_tab_action.triggered.connect(lambda: self.open_in_new_tab(url))
-        
+
         menu.addSeparator()
-        
+
         # Edit
         edit_action = menu.addAction("Edit")
         edit_action.triggered.connect(lambda: self.edit_favorite(title, url))
-        
+
         # Remove from bar
         remove_action = menu.addAction("Remove from favorites bar")
         remove_action.triggered.connect(lambda: self.remove_from_bar(title, url))
-        
+
         menu.addSeparator()
-        
+
         # Delete
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(lambda: self.delete_favorite(title, url))
-        
+
         return menu
-    
     def add_add_favorite_action(self):
         """Adds the button to add the current page"""
         add_action = QAction("⭐", self)
         add_action.setToolTip("Add current page to favorites")
         add_action.triggered.connect(self.add_current_page)
         self.addAction(add_action)
-    
     def add_current_page(self):
         """Adds the current page to favorites"""
         try:
@@ -291,109 +276,100 @@ class FavoritesBar(QToolBar):
                 if current_tab:
                     url = current_tab.url().toString()
                     title = current_tab.page().title()
-                    
+
                     # Show dialog
                     dialog = FavoriteDialog(self, title, url)
                     if dialog.exec():
                         values = dialog.get_values()
                         self.save_favorite(values)
-                        
         except Exception as e:
             logger.error("Error adding current page to favorites: %s", e)
-    
     def save_favorite(self, values):
         """Saves a favorite to the database"""
         try:
             conn = sqlite3.connect('bookmarks.db')
             cursor = conn.cursor()
-            
+
             # Prepare notes and tags based on whether it's shown in the bar
             notes = "[barra]" if values['show_in_bar'] else ""
             tags = "barra" if values['show_in_bar'] else ""
-            
+
             # Insert into database
             cursor.execute("""
                 INSERT INTO bookmarks (title, url, category, notes, tags) 
                 VALUES (?, ?, ?, ?, ?)
             """, (values['title'], values['url'], values['category'], notes, tags))
-            
+
             conn.commit()
             conn.close()
-            
+
             # Reload the bar
             self.load_favorites()
-            
+
             QMessageBox.information(self, "Success", "Favorite saved successfully")
-            
         except Exception as e:
             logger.error("Error saving favorite to bookmarks.db: %s", e)
             QMessageBox.critical(self, "Error", f"Error saving favorite: {e}")
-    
     def edit_favorite(self, title, url):
         """Edits an existing favorite"""
         try:
             conn = sqlite3.connect('bookmarks.db')
             cursor = conn.cursor()
-            
+
             # Get current data
             cursor.execute("""
                 SELECT title, url, category, notes, tags 
                 FROM bookmarks 
                 WHERE url = ?
             """, (url,))
-            
+
             result = cursor.fetchone()
             if result:
                 current_title, current_url, current_category, current_notes, current_tags = result
                 show_in_bar = "[barra]" in current_notes or "barra" in current_tags
-                
+
                 # Show edit dialog
                 dialog = FavoriteDialog(self, current_title, current_url, current_category, show_in_bar)
                 if dialog.exec():
                     values = dialog.get_values()
                     self.update_favorite(url, values)
-            
             conn.close()
-            
         except Exception as e:
             logger.error("Error editing favorite '%s' (%s): %s", title, url, e)
             QMessageBox.critical(self, "Error", f"Error editing favorite: {e}")
-    
     def update_favorite(self, old_url, values):
         """Updates an existing favorite"""
         try:
             conn = sqlite3.connect('bookmarks.db')
             cursor = conn.cursor()
-            
+
             # Prepare notes and tags
             notes = "[barra]" if values['show_in_bar'] else ""
             tags = "barra" if values['show_in_bar'] else ""
-            
+
             # Update in database
             cursor.execute("""
                 UPDATE bookmarks 
                 SET title = ?, url = ?, category = ?, notes = ?, tags = ?
                 WHERE url = ?
             """, (values['title'], values['url'], values['category'], notes, tags, old_url))
-            
+
             conn.commit()
             conn.close()
-            
+
             # Reload the bar
             self.load_favorites()
-            
+
             QMessageBox.information(self, "Success", "Favorite updated successfully")
-            
         except Exception as e:
             logger.error("Error updating favorite %s -> %s: %s", old_url, values.get('url'), e)
             QMessageBox.critical(self, "Error", f"Error updating favorite: {e}")
-    
     def remove_from_bar(self, title, url):
         """Removes a favorite from the bar (but does not delete it)"""
         try:
             conn = sqlite3.connect('bookmarks.db')
             cursor = conn.cursor()
-            
+
             # Update to remove from bar
             cursor.execute("""
                 UPDATE bookmarks 
@@ -401,19 +377,17 @@ class FavoritesBar(QToolBar):
                     tags = REPLACE(tags, 'barra', '')
                 WHERE url = ?
             """, (url,))
-            
+
             conn.commit()
             conn.close()
-            
+
             # Reload the bar
             self.load_favorites()
-            
+
             QMessageBox.information(self, "Success", "Favorite removed from bar")
-            
         except Exception as e:
             logger.error("Error removing favorite '%s' (%s) from bar: %s", title, url, e)
             QMessageBox.critical(self, "Error", f"Error removing favorite from bar: {e}")
-    
     def delete_favorite(self, title, url):
         """Completely deletes a favorite"""
         reply = QMessageBox.question(
@@ -421,26 +395,24 @@ class FavoritesBar(QToolBar):
             f"Are you sure you want to delete '{title}'?",
             QMessageBox.Yes | QMessageBox.No
         )
-        
+
         if reply == QMessageBox.Yes:
             try:
                 conn = sqlite3.connect('bookmarks.db')
                 cursor = conn.cursor()
-                
+
                 cursor.execute("DELETE FROM bookmarks WHERE url = ?", (url,))
-                
+
                 conn.commit()
                 conn.close()
-                
+
                 # Reload the bar
                 self.load_favorites()
-                
+
                 QMessageBox.information(self, "Success", "Favorite deleted successfully")
-                
             except Exception as e:
                 logger.error("Error deleting favorite '%s' (%s): %s", title, url, e)
                 QMessageBox.critical(self, "Error", f"Error deleting favorite: {e}")
-    
     def open_in_new_tab(self, url):
         """Opens a favorite in a new tab"""
         try:
@@ -449,15 +421,12 @@ class FavoritesBar(QToolBar):
                 main_window.tab_manager.add_new_tab(url)
         except Exception as e:
             logger.error("Error opening favorite in new tab (%s): %s", url, e)
-    
     def get_favicon(self, url):
         """Gets the favicon for a URL"""
         return get_favicon_icon(url, self.favicon_cache)
-    
     def refresh_favorites(self):
         """Updates the favorites bar"""
         self.load_favorites()
-
     # ─── Integración con el sistema de carpetas ───────────────────────────────
 
     def load_with_folders(self, folders_manager) -> None:
@@ -479,20 +448,16 @@ class FavoritesBar(QToolBar):
             # Subcarpetas de la raíz → botón con submenú
             for sub in hierarchy.get("children_folders", []):
                 self._add_folder_button(sub)
-
             # Marcadores directamente en la raíz
             for bm in hierarchy.get("children_bookmarks", []):
                 self.add_favorite_to_bar(bm["title"], bm["url"])
-
             # Separador + botón de añadir
             self.addSeparator()
             self.add_add_favorite_action()
-
         except Exception as e:
             logger.error("Error cargando barra de favoritos con carpetas: %s", e)
             # Fallback al sistema anterior
             self.load_favorites()
-
     _FOLDER_MENU_STYLE = """
         QMenu {
             background-color: #1e1e2e;
@@ -568,10 +533,8 @@ class FavoritesBar(QToolBar):
             btn.setMinimumWidth(text_px + 24)   # padding izq+der = 2×10 + 4 extra
 
             self.addWidget(btn)
-
         except Exception as e:
             logger.error("Error añadiendo botón de carpeta '%s': %s", folder_node.get("name"), e)
-
     def _build_folder_submenu(self, menu: QMenu, folder_node: dict) -> None:
         """
         Rellena *menu* de forma recursiva con las subcarpetas y marcadores
@@ -582,12 +545,10 @@ class FavoritesBar(QToolBar):
             submenu = menu.addMenu(f"📁 {sub['name']}")
             submenu.setStyleSheet(self._FOLDER_MENU_STYLE)
             self._build_folder_submenu(submenu, sub)
-
         # Marcadores de esta carpeta
         bms = folder_node.get("children_bookmarks", [])
         if folder_node.get("children_folders") and bms:
             menu.addSeparator()
-
         for bm in bms:
             url = bm["url"]
             title = bm["title"]

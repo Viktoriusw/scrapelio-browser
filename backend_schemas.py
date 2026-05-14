@@ -29,16 +29,13 @@ def validate_dict_schema(data: Dict, schema: Dict[str, tuple], strict: bool = Fa
         data: Datos a validar
         schema: Esquema en formato {campo: (tipo, requerido)}
         strict: Si True, no permite campos adicionales
-
     Returns:
         Diccionario validado
-
     Raises:
         ValidationError: Si la validación falla
     """
     if not isinstance(data, dict):
         raise ValidationError(f"Expected dict, got {type(data).__name__}")
-
     validated = {}
 
     # Validar campos del esquema
@@ -47,22 +44,18 @@ def validate_dict_schema(data: Dict, schema: Dict[str, tuple], strict: bool = Fa
             if required:
                 raise ValidationError(f"Required field '{field}' is missing")
             continue
-
         value = data[field]
 
         # Permitir None si no es requerido
         if value is None and not required:
             validated[field] = None
             continue
-
         # Validar tipo
         if not isinstance(value, expected_type):
             raise ValidationError(
                 f"Field '{field}' must be {expected_type.__name__}, got {type(value).__name__}"
             )
-
         validated[field] = value
-
     # En modo strict, rechazar campos adicionales
     if strict:
         extra_fields = set(data.keys()) - set(schema.keys())
@@ -73,7 +66,6 @@ def validate_dict_schema(data: Dict, schema: Dict[str, tuple], strict: bool = Fa
         for field, value in data.items():
             if field not in validated:
                 validated[field] = value
-
     return validated
 
 
@@ -168,7 +160,6 @@ def validate_plugin_list(data: Dict) -> Dict:
                 else:
                     logger.warning(f"Invalid plugin entry in list: {type(plugin)}")
             validated['plugins'] = validated_plugins
-
         return validated
     except ValidationError as e:
         logger.error(f"Plugin list validation failed: {e}")
@@ -183,7 +174,6 @@ def safe_validate(data: Any, validator_func, default: Any = None) -> Any:
         data: Datos a validar
         validator_func: Función de validación
         default: Valor por defecto si falla la validación
-
     Returns:
         Datos validados o valor por defecto
     """

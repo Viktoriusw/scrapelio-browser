@@ -41,15 +41,12 @@ class TorBootstrapWorker(QThread):
         super().__init__()
         self.tor_manager = tor_manager
         self._cancelled = False
-
     def cancel(self) -> None:
         self._cancelled = True
-
     def run(self) -> None:
         def on_progress(pct: int) -> None:
             if not self._cancelled:
                 self.progress.emit(pct)
-
         success = self.tor_manager.start(progress_callback=on_progress)
         if self._cancelled:
             self.tor_manager.stop()
@@ -75,11 +72,9 @@ class TorPanel(QWidget):
         self._restart_callback = None
         self.setup_ui()
         self._update_ui_state()
-
     def set_restart_callback(self, callback) -> None:
         """Callback para reiniciar el navegador (enabled: bool) -> None."""
         self._restart_callback = callback
-
     def setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -135,7 +130,6 @@ class TorPanel(QWidget):
 
         layout.addLayout(btn_layout)
         layout.addStretch()
-
     def _update_ui_state(self) -> None:
         """Actualiza la UI según el estado actual."""
         err = self.tor_manager.get_availability_error() if TOR_AVAILABLE else "stem no instalado"
@@ -143,7 +137,6 @@ class TorPanel(QWidget):
         if err:
             self._show_unavailable(err)
             return
-
         # Tor ya activo (p. ej. tras reinicio): SOCKS5 listo y config habilitada
         if (
             config
@@ -153,7 +146,6 @@ class TorPanel(QWidget):
             self.tor_manager._status = TorStatus.CONNECTED
             self._show_connected()
             return
-
         status = self.tor_manager.status
 
         if status == TorStatus.STOPPED:
@@ -164,7 +156,6 @@ class TorPanel(QWidget):
             self._show_connected()
         else:
             self._show_error(self.tor_manager.error_message or "Error")
-
     def _show_unavailable(self, message: str) -> None:
         """Estado: Tor no disponible (falta stem o binario)."""
         self.status_label.setText("Tor no disponible")
@@ -175,7 +166,6 @@ class TorPanel(QWidget):
         self.cancel_btn.setVisible(False)
         self.disconnect_btn.setVisible(False)
         self.new_identity_btn.setVisible(False)
-
     def _show_disconnected(self) -> None:
         """Estado: Desconectado, listo para conectar."""
         self.status_label.setText("Tor desconectado")
@@ -189,7 +179,6 @@ class TorPanel(QWidget):
         self.cancel_btn.setVisible(False)
         self.disconnect_btn.setVisible(False)
         self.new_identity_btn.setVisible(False)
-
     def _show_connecting(self) -> None:
         """Estado: Bootstrap en progreso."""
         pct = self.tor_manager.bootstrap_percent
@@ -201,7 +190,6 @@ class TorPanel(QWidget):
         self.cancel_btn.setVisible(True)
         self.disconnect_btn.setVisible(False)
         self.new_identity_btn.setVisible(False)
-
     def _show_connected(self) -> None:
         """Estado: Conectado."""
         self.status_label.setText("Tor activo")
@@ -213,7 +201,6 @@ class TorPanel(QWidget):
         self.cancel_btn.setVisible(False)
         self.disconnect_btn.setVisible(True)
         self.new_identity_btn.setVisible(True)
-
     def _show_error(self, message: str) -> None:
         """Estado: Error."""
         self.status_label.setText("Error")
@@ -225,12 +212,10 @@ class TorPanel(QWidget):
         self.cancel_btn.setVisible(False)
         self.disconnect_btn.setVisible(False)
         self.new_identity_btn.setVisible(False)
-
     def _on_connect_clicked(self) -> None:
         """Usuario pulsa Conectar a Tor."""
         if self._bootstrap_worker and self._bootstrap_worker.isRunning():
             return
-
         self._bootstrap_worker = TorBootstrapWorker(self.tor_manager)
         self._bootstrap_worker.progress.connect(self._on_bootstrap_progress)
         self._bootstrap_worker.finished_success.connect(self._on_bootstrap_success)
@@ -238,12 +223,10 @@ class TorPanel(QWidget):
         self._bootstrap_worker.start()
 
         self._update_ui_state()
-
     def _on_bootstrap_progress(self, pct: int) -> None:
         self.tor_manager._bootstrap_percent = pct
         self.progress_bar.setValue(pct)
         self.status_label.setText(f"Conectando... Bootstrap: {pct}%")
-
     def _on_bootstrap_success(self) -> None:
         self._bootstrap_worker = None
         # Si Tor ya estaba corriendo (SOCKS5 activo, _process=None), no pedir reinicio
@@ -254,7 +237,6 @@ class TorPanel(QWidget):
         if not self._restart_callback:
             self._show_error("No hay callback de reinicio configurado")
             return
-
         reply = QMessageBox.question(
             self,
             "Reiniciar navegador",
@@ -265,11 +247,9 @@ class TorPanel(QWidget):
         )
         if reply == QMessageBox.Yes:
             self._restart_callback(True)
-
     def _on_bootstrap_error(self, message: str) -> None:
         self._bootstrap_worker = None
         self._show_error(message)
-
     def _on_cancel_clicked(self) -> None:
         """Usuario cancela el bootstrap."""
         if self._bootstrap_worker and self._bootstrap_worker.isRunning():
@@ -278,7 +258,6 @@ class TorPanel(QWidget):
         self.tor_manager.stop()
         self._bootstrap_worker = None
         self._update_ui_state()
-
     def _on_disconnect_clicked(self) -> None:
         """Usuario pulsa Desconectar."""
         reply = QMessageBox.question(
@@ -292,7 +271,6 @@ class TorPanel(QWidget):
             self.tor_manager.stop()
             if self._restart_callback:
                 self._restart_callback(False)
-
     def _on_new_identity_clicked(self) -> None:
         """Usuario solicita nueva identidad (nuevo circuito)."""
         if self.tor_manager.request_new_identity():

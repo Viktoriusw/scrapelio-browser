@@ -44,7 +44,6 @@ def restart_with_tor(enabled: bool, window) -> None:
         except Exception:
             pass
         config.set_tor_pending_urls(urls)
-
     config.set_tor_enabled(enabled)
     config.persist_config()
 

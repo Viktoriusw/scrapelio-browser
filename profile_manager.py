@@ -45,13 +45,11 @@ class ProfileManager(QObject):
 
         # Cargar o crear perfil por defecto
         self.load_or_create_default_profile()
-
     def _get_profiles_directory(self):
         """Obtiene el directorio para almacenar perfiles"""
         app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
         profiles_dir = os.path.join(app_data, "Scrapelio", "Profiles")
         return profiles_dir
-
     def setup_database(self):
         """Configura la base de datos de perfiles"""
         conn = sqlite3.connect(self.db_path)
@@ -71,7 +69,6 @@ class ProfileManager(QObject):
 
         conn.commit()
         conn.close()
-
     def create_profile(self, name, icon="👤", color="#4a90e2"):
         """
         Crea un nuevo perfil
@@ -80,7 +77,6 @@ class ProfileManager(QObject):
             name: Nombre del perfil
             icon: Emoji o icono para el perfil
             color: Color de acento del perfil
-
         Returns:
             str: ID del perfil creado
         """
@@ -113,7 +109,6 @@ class ProfileManager(QObject):
 
         self.profile_created.emit(profile_id)
         return profile_id
-
     def load_or_create_default_profile(self):
         """Carga el perfil por defecto o lo crea si no existe"""
         profiles = self.get_all_profiles()
@@ -130,7 +125,6 @@ class ProfileManager(QObject):
                 self.current_profile_id = default['id']
             else:
                 self.current_profile_id = profiles[0]['id']
-
     def get_all_profiles(self):
         """Obtiene todos los perfiles"""
         conn = sqlite3.connect(self.db_path)
@@ -153,10 +147,8 @@ class ProfileManager(QObject):
                 'last_used': row[5],
                 'is_default': bool(row[6])
             })
-
         conn.close()
         return profiles
-
     def get_profile(self, profile_id):
         """Obtiene un perfil específico"""
         conn = sqlite3.connect(self.db_path)
@@ -182,7 +174,6 @@ class ProfileManager(QObject):
                 'is_default': bool(row[6])
             }
         return None
-
     def get_default_profile(self):
         """Obtiene el perfil marcado como predeterminado"""
         conn = sqlite3.connect(self.db_path)
@@ -209,7 +200,6 @@ class ProfileManager(QObject):
                 'is_default': bool(row[6])
             }
         return None
-
     def set_default_profile(self, profile_id):
         """Establece un perfil como predeterminado"""
         conn = sqlite3.connect(self.db_path)
@@ -223,13 +213,11 @@ class ProfileManager(QObject):
 
         conn.commit()
         conn.close()
-
     def switch_profile(self, profile_id):
         """Cambia al perfil especificado"""
         profile = self.get_profile(profile_id)
         if not profile:
             return False
-
         # Actualizar last_used
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -246,7 +234,6 @@ class ProfileManager(QObject):
         self.current_profile_id = profile_id
         self.profile_changed.emit(profile_id)
         return True
-
     def update_profile(self, profile_id, name=None, icon=None, color=None):
         """Actualiza los datos de un perfil"""
         conn = sqlite3.connect(self.db_path)
@@ -258,34 +245,27 @@ class ProfileManager(QObject):
         if name is not None:
             updates.append("name = ?")
             params.append(name)
-
         if icon is not None:
             updates.append("icon = ?")
             params.append(icon)
-
         if color is not None:
             updates.append("color = ?")
             params.append(color)
-
         if updates:
             params.append(profile_id)
             query = f"UPDATE profiles SET {', '.join(updates)} WHERE id = ?"
             cursor.execute(query, params)
             conn.commit()
-
         conn.close()
-
     def delete_profile(self, profile_id):
         """Elimina un perfil"""
         # No permitir eliminar el último perfil
         profiles = self.get_all_profiles()
         if len(profiles) <= 1:
             return False
-
         # No permitir eliminar el perfil actual
         if profile_id == self.current_profile_id:
             return False
-
         # Eliminar directorio del perfil
         profile_path = os.path.join(self.profiles_dir, profile_id)
         if os.path.exists(profile_path):
@@ -294,7 +274,6 @@ class ProfileManager(QObject):
             except Exception as e:
                 print(f"Error eliminando directorio del perfil: {e}")
                 return False
-
         # Eliminar de base de datos
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -306,7 +285,6 @@ class ProfileManager(QObject):
 
         self.profile_deleted.emit(profile_id)
         return True
-
     def get_profile_path(self, profile_id=None, subdirectory=None):
         """
         Obtiene la ruta del directorio de un perfil
@@ -317,14 +295,11 @@ class ProfileManager(QObject):
         """
         if profile_id is None:
             profile_id = self.current_profile_id
-
         path = os.path.join(self.profiles_dir, profile_id)
 
         if subdirectory:
             path = os.path.join(path, subdirectory)
-
         return path
-
     def get_current_profile(self):
         """Obtiene los datos del perfil actual"""
         if self.current_profile_id:
@@ -349,7 +324,6 @@ class ProfileDialog(QDialog):
 
         if self.is_edit_mode:
             self.load_profile_data()
-
     def setup_ui(self):
         """Configurar interfaz del diálogo"""
         layout = QVBoxLayout(self)
@@ -444,7 +418,6 @@ class ProfileDialog(QDialog):
 
         # Actualizar preview inicial
         self.update_preview()
-
     def load_profile_data(self):
         """Cargar datos del perfil para edición"""
         profile = self.profile_manager.get_profile(self.profile_id)
@@ -457,14 +430,12 @@ class ProfileDialog(QDialog):
                 if self.icon_combo.itemText(i).startswith(icon_text):
                     self.icon_combo.setCurrentIndex(i)
                     break
-
             # Buscar color
             color = profile['color']
             for i in range(self.color_combo.count()):
                 if self.color_combo.itemData(i) == color:
                     self.color_combo.setCurrentIndex(i)
                     break
-
     def update_preview(self):
         """Actualizar vista previa del perfil"""
         name = self.name_input.text() or "Nuevo perfil"
@@ -483,7 +454,6 @@ class ProfileDialog(QDialog):
                 min-height: 60px;
             }}
         """)
-
     def accept_dialog(self):
         """Procesar creación o edición del perfil"""
         name = self.name_input.text().strip()
@@ -492,7 +462,6 @@ class ProfileDialog(QDialog):
             QMessageBox.warning(self, "Nombre requerido",
                               "Por favor ingresa un nombre para el perfil.")
             return
-
         icon_text = self.icon_combo.currentText()
         icon = icon_text.split()[0] if icon_text else "👤"
         color = self.color_combo.currentData() or "#4a90e2"
@@ -503,7 +472,6 @@ class ProfileDialog(QDialog):
         else:
             # Crear nuevo perfil
             self.profile_manager.create_profile(name, icon, color)
-
         self.accept()
 
 
@@ -522,7 +490,6 @@ class ProfileSwitcher(QWidget):
         self.profile_manager.profile_changed.connect(self.update_current_profile)
         self.profile_manager.profile_created.connect(self.update_current_profile)
         self.profile_manager.profile_deleted.connect(self.update_current_profile)
-
     def setup_ui(self):
         """Configurar interfaz del switcher"""
         layout = QHBoxLayout(self)
@@ -547,7 +514,6 @@ class ProfileSwitcher(QWidget):
         self.profile_button.clicked.connect(self.show_profile_menu)
 
         layout.addWidget(self.profile_button)
-
     def update_current_profile(self):
         """Actualizar botón con el perfil actual"""
         profile = self.profile_manager.get_current_profile()
@@ -570,7 +536,6 @@ class ProfileSwitcher(QWidget):
                     background-color: {color}20;
                 }}
             """)
-
     def show_profile_menu(self):
         """Mostrar menú de perfiles"""
         menu = QMenu(self)
@@ -592,7 +557,6 @@ class ProfileSwitcher(QWidget):
                 font = action.font()
                 font.setBold(True)
                 action.setFont(font)
-
         menu.addSeparator()
 
         # Opción para crear nuevo perfil
@@ -609,7 +573,6 @@ class ProfileSwitcher(QWidget):
         if action and action.data():
             # Cambiar a perfil seleccionado
             self.switch_to_profile(action.data())
-
     def switch_to_profile(self, profile_id):
         """Cambiar a un perfil específico"""
         if profile_id != self.profile_manager.current_profile_id:
@@ -625,13 +588,11 @@ class ProfileSwitcher(QWidget):
                 # Recargar navegador con nuevo perfil
                 if self.parent_window and hasattr(self.parent_window, 'reload_with_new_profile'):
                     self.parent_window.reload_with_new_profile()
-
     def create_new_profile(self):
         """Crear nuevo perfil"""
         dialog = ProfileDialog(self.profile_manager, parent=self.parent_window)
         if dialog.exec():
             self.update_current_profile()
-
     def manage_profiles(self):
         """Abrir gestor de perfiles"""
         dialog = ProfileManagerDialog(self.profile_manager, parent=self.parent_window)
@@ -651,7 +612,6 @@ class ProfileManagerDialog(QDialog):
 
         self.setup_ui()
         self.load_profiles()
-
     def setup_ui(self):
         """Configurar interfaz del gestor"""
         layout = QVBoxLayout(self)
@@ -693,7 +653,6 @@ class ProfileManagerDialog(QDialog):
         close_btn = QPushButton("Cerrar")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
-
     def load_profiles(self):
         """Cargar lista de perfiles"""
         self.profiles_list.clear()
@@ -705,42 +664,35 @@ class ProfileManagerDialog(QDialog):
                 item_text += " ⭐"
             if profile['id'] == self.profile_manager.current_profile_id:
                 item_text += " (Activo)"
-
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, profile['id'])
             self.profiles_list.addItem(item)
-
     def new_profile(self):
         """Crear nuevo perfil"""
         dialog = ProfileDialog(self.profile_manager, parent=self)
         if dialog.exec():
             self.load_profiles()
-
     def edit_profile(self):
         """Editar perfil seleccionado"""
         current_item = self.profiles_list.currentItem()
         if current_item:
             self.edit_profile_item(current_item)
-
     def edit_profile_item(self, item):
         """Editar un perfil específico"""
         profile_id = item.data(Qt.UserRole)
         dialog = ProfileDialog(self.profile_manager, profile_id, parent=self)
         if dialog.exec():
             self.load_profiles()
-
     def delete_profile(self):
         """Eliminar perfil seleccionado"""
         current_item = self.profiles_list.currentItem()
         if not current_item:
             return
-
         profile_id = current_item.data(Qt.UserRole)
         profile = self.profile_manager.get_profile(profile_id)
 
         if not profile:
             return
-
         # Verificar si es el perfil actual
         if profile_id == self.profile_manager.current_profile_id:
             QMessageBox.warning(
@@ -749,7 +701,6 @@ class ProfileManagerDialog(QDialog):
                 "No puedes eliminar el perfil activo. Cambia a otro perfil primero."
             )
             return
-
         # Confirmar eliminación
         reply = QMessageBox.question(
             self,
@@ -767,13 +718,11 @@ class ProfileManagerDialog(QDialog):
             else:
                 QMessageBox.critical(self, "Error",
                                    "No se pudo eliminar el perfil.")
-
     def set_default(self):
         """Establecer perfil seleccionado como predeterminado"""
         current_item = self.profiles_list.currentItem()
         if not current_item:
             return
-
         profile_id = current_item.data(Qt.UserRole)
         self.profile_manager.set_default_profile(profile_id)
         self.load_profiles()

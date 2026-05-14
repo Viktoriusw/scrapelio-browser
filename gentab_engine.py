@@ -95,7 +95,6 @@ class ContentExtractor:
             return any(se in host for se in ContentExtractor._SEARCH_ENGINE_DOMAINS)
         except Exception:
             return False
-
     @staticmethod
     def _resolve_search_links(soup: BeautifulSoup, page_url: str) -> List[str]:
         """Extrae URLs reales de páginas de resultados de búsqueda.
@@ -109,57 +108,46 @@ class ContentExtractor:
             base_domain = urlparse(page_url).netloc.lower()
         except Exception:
             pass
-
         for a in soup.find_all('a', href=True):
             href = a['href']
             link_text = a.get_text(strip=True)
 
             if not link_text or len(link_text) < 4:
                 continue
-
             # Ignorar links internos del propio buscador
             if href.startswith('/') or href.startswith('#'):
                 continue
-
             try:
                 link_domain = urlparse(href).netloc.lower()
             except Exception:
                 continue
-
             # Saltar links que son del propio buscador
             if any(se in link_domain for se in ContentExtractor._SEARCH_ENGINE_DOMAINS):
                 continue
-
             # Saltar links internos de navegación del buscador
             if base_domain and link_domain == base_domain:
                 continue
-
             if href.startswith('http') and link_text:
                 real_links.append(f"{link_text}: {href}")
-
         return real_links[:20]
-
     @staticmethod
     def extract_from_html(html: str, url: str, title: str) -> str:
         try:
             soup = BeautifulSoup(html, 'lxml')
         except Exception:
             soup = BeautifulSoup(html, 'html.parser')
-
         is_search = ContentExtractor._is_search_engine(url)
 
         for tag in soup(['script', 'style', 'nav', 'footer', 'aside',
                          'iframe', 'noscript', 'svg', 'form', 'input',
                          'button', 'select', 'textarea']):
             tag.decompose()
-
         headings = []
         for h in soup.find_all(['h1', 'h2', 'h3']):
             text = h.get_text(strip=True)
             if text:
                 level = h.name
                 headings.append(f"[{level.upper()}] {text}")
-
         if is_search:
             links = ContentExtractor._resolve_search_links(soup, url)
         else:
@@ -170,13 +158,11 @@ class ContentExtractor:
                 if link_text and len(link_text) > 3 and href.startswith('http'):
                     links.append(f"{link_text}: {href}")
             links = links[:15]
-
         images = []
         for img in soup.find_all('img', alt=True):
             alt = img.get('alt', '').strip()
             if alt and len(alt) > 3:
                 images.append(alt)
-
         main_content = soup.find('main') or soup.find('article') or soup.find('body')
         text = main_content.get_text(separator='\n', strip=True) if main_content else ""
 
@@ -191,9 +177,7 @@ class ContentExtractor:
             sections.append("IMAGES: " + ', '.join(images[:10]))
         if links:
             sections.append("LINKS (real destination URLs):\n" + '\n'.join(links))
-
         return '\n\n'.join(sections)
-
     @staticmethod
     def get_domain(url: str) -> str:
         try:
@@ -227,7 +211,6 @@ class GenTabWorker(QThread):
             cfg.max_tokens = max_tokens
             self.llm_config = cfg
         self._model_ctx_window = 4096
-
     _CTX_OVERHEAD_TOKENS = 500
     _MIN_CONTEXT_CHARS = 800
     _MAX_INITIAL_CONTEXT_CHARS = 10000
@@ -257,7 +240,6 @@ class GenTabWorker(QThread):
                 context_text = self._build_context(max_total_chars=context_budget)
                 user_prompt = self._build_user_prompt(context_text)
                 prompt_tokens = self._estimate_tokens(system_prompt) + self._estimate_tokens(user_prompt)
-
             self.progress.emit(
                 f"Contexto: {len(context_text)} chars de {len(self.tab_contexts)} pestañas "
                 f"(ventana: {self._model_ctx_window} tokens)"
@@ -284,11 +266,9 @@ class GenTabWorker(QThread):
             if not html:
                 html = self._build_fallback_html(raw_content or "No se pudo generar contenido.")
                 self.progress.emit("Respuesta sin HTML válido. Usando fallback de texto.")
-
             if self._is_html_visually_empty(html):
                 self.progress.emit("HTML vacío. Construyendo resumen interactivo local.")
                 html = self._build_local_summary_html()
-
             html = self._inject_source_links(html)
             model_name = self.llm_config.llmapi_model if self.llm_config.provider == PROVIDER_LLMAPI else "local"
             logger.info(
@@ -313,7 +293,6 @@ class GenTabWorker(QThread):
             )
 
             self.finished.emit(result)
-
         except LLMError as e:
             self.error.emit(str(e))
         except requests.exceptions.ConnectionError:
@@ -322,7 +301,6 @@ class GenTabWorker(QThread):
             self.error.emit("Timeout: el servidor tardó demasiado en responder.")
         except Exception as e:
             self.error.emit(f"Error inesperado: {str(e)}")
-
     def _build_context(self, max_total_chars: Optional[int] = None) -> str:
         sections = []
         total = 0
@@ -343,7 +321,6 @@ class GenTabWorker(QThread):
             )
             total += len(chunk)
         return '\n\n'.join(sections)
-
     def _build_system_prompt(self) -> str:
         return """You are GenTab. Transform browser tab data into a complete, working single-page HTML app.
 
@@ -359,12 +336,21 @@ BUILD STRATEGY (follow this order):
 3. Write a render() function that loops over the array and creates HTML cards/rows for each item.
 4. Call render() on load. Add a search <input> that filters items and re-renders.
 
-VISUAL STYLE:
-- Dark theme: body bg #0f0f23, card bg #1a1a3e, accent #6366f1, text #e2e8f0
-- Cards: border-radius:12px; padding:16px; margin:8px; transition:transform .15s
-- Card hover: transform:translateY(-3px); border-color:#6366f1
+VISUAL STYLE (DUAL THEME — mandatory):
+- Use CSS variables in :root for ALL colors. Define TWO sets:
+  - Dark (default): :root { --bg:#0f0f23; --card:#1a1a3e; --text:#e2e8f0; --muted:#94a3b8; --accent:#6366f1; --accent2:#818cf8; --border:rgba(99,102,241,0.3); --card-shadow:rgba(0,0,0,0.25); --body-bg:radial-gradient(ellipse at 20% 0%,#1e1b4b,#0f0f23 60%); }
+  - Light: [data-theme="light"] { --bg:#f8fafc; --card:#ffffff; --text:#1e293b; --muted:#64748b; --accent:#4f46e5; --accent2:#6366f1; --border:rgba(99,102,241,0.2); --card-shadow:rgba(0,0,0,0.08); --body-bg:linear-gradient(135deg,#eef2ff,#f8fafc 60%); }
+- body { background:var(--body-bg); color:var(--text); }
+- Cards: background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin:8px; transition:transform .15s; box-shadow:0 4px 16px var(--card-shadow);
+- Card hover: transform:translateY(-3px); border-color:var(--accent);
 - Layout: CSS grid, 2-3 columns on wide screens, 1 column on mobile
 - Font: system-ui
+- REQUIRED: Add a floating theme toggle button in the top-right corner:
+  <button id="themeToggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'" style="position:fixed;top:12px;right:12px;z-index:99999;background:var(--card);border:1px solid var(--border);border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:18px;color:var(--text);display:flex;align-items:center;justify-content:center;">🌓</button>
+
+SOURCE ATTRIBUTION (required):
+- Each card/item MUST include a small "Source: [domain]" label that links to the original URL.
+- At the end of the page, add a "Sources" section listing all source URLs with their titles.
 
 IMPORTANT: Prioritize DATA RICHNESS over visual complexity. Fill every card with real content from the tabs. An app with 10 filled cards is far better than a pretty empty shell."""
 
@@ -372,7 +358,6 @@ IMPORTANT: Prioritize DATA RICHNESS over visual complexity. Fill every card with
         request = (self.prompt or "").strip()
         if len(request) > 800:
             request = request[:800] + "..."
-
         source_list = '\n'.join(
             f"Tab{tc.index + 1}: {tc.title} — {tc.url}"
             for tc in self.tab_contexts[:10]
@@ -393,23 +378,26 @@ OUTPUT: A single HTML document. Follow this structure EXACTLY:
 <script>
 const DATA = [
   // ← Fill this array with ALL items/articles/results extracted from the tab content above.
-  // Each object: {{ title, description, url, tag, date, price }} (use only fields that exist in the data)
+  // Each object: {{ title, description, url, tag, date, price, source_url, source_domain }}
+  // MUST include source_url and source_domain from the original tab for each item.
   // Extract AT LEAST 5 items. If the tab has a list, extract every list item.
 ];
 function render(items) {{
   // Loop over items, create card elements, append to grid
+  // Each card MUST show: <a class="source" href="${{d.source_url}}">${{d.source_domain}}</a>
 }}
 render(DATA);
 document.getElementById('search').oninput = e => render(DATA.filter(d => JSON.stringify(d).toLowerCase().includes(e.target.value.toLowerCase())));
 </script>
 </body></html>
 
+After the card grid, include a <footer> section titled "Fuentes" listing all source URLs as links.
+
 Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimación rápida para ajustar presupuesto (aprox 1 token cada 4 chars)."""
         return max(1, int(len(text or "") / 4))
-
     # _detect_context_window movido a LLMClient.detect_context_window()
 
     def _extract_html(self, raw: str) -> str:
@@ -422,20 +410,17 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
                 if end > start:
                     raw = raw[start:end].strip()
                 break
-
         if raw.startswith('```'):
             raw = raw[3:]
             if raw.endswith('```'):
                 raw = raw[:-3]
             raw = raw.strip()
-
         if not raw.strip().startswith('<!DOCTYPE') and not raw.strip().startswith('<html'):
             if '<html' in raw:
                 idx = raw.index('<html')
                 raw = raw[idx:]
             elif '<body' in raw:
                 raw = f"<!DOCTYPE html><html><head><meta charset='UTF-8'></head>{raw}</html>"
-
         if '<html' not in raw.lower() and '<body' not in raw.lower() and '<div' in raw.lower():
             raw = f"""<!DOCTYPE html>
 <html lang="es">
@@ -446,7 +431,6 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
         # Si sigue sin contener estructura HTML útil, devolver vacío para fallback
         has_html = ("<html" in raw.lower()) or ("<body" in raw.lower()) or ("<div" in raw.lower())
         return raw if has_html else ""
-
     def _build_fallback_html(self, text: str) -> str:
         """Construye HTML con formato cuando la IA devuelve texto plano."""
         safe_text = _html_escape.escape(text or "")
@@ -479,26 +463,39 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{title}</title>
   <style>
+    :root {{ --bg:#0f0f23; --card:#1a1a3e; --text:#e2e8f0; --muted:#94a3b8;
+             --accent:#6366f1; --border:rgba(99,102,241,0.3);
+             --card-shadow:rgba(0,0,0,0.25);
+             --body-bg:radial-gradient(ellipse at 20% 0%,#1e1b4b,#0f0f23 60%); }}
+    [data-theme="light"] {{ --bg:#f8fafc; --card:#ffffff; --text:#1e293b; --muted:#64748b;
+             --accent:#4f46e5; --border:rgba(99,102,241,0.2);
+             --card-shadow:rgba(0,0,0,0.08);
+             --body-bg:linear-gradient(135deg,#eef2ff,#f8fafc 60%); }}
     body {{
       font-family: system-ui, -apple-system, sans-serif;
       margin: 0; padding: 24px;
-      background: radial-gradient(ellipse at 20% 0%, #1e1b4b, #0f0f23 60%);
-      color: #e2e8f0;
+      background: var(--body-bg); color: var(--text);
     }}
     .container {{ max-width: 800px; margin: 0 auto; }}
     h1 {{ font-size: 24px; margin-bottom: 8px; }}
-    .meta {{ color: #94a3b8; font-size: 13px; margin-bottom: 20px; }}
+    .meta {{ color: var(--muted); font-size: 13px; margin-bottom: 20px; }}
     .content {{
-      background: #1a1a3e; border: 1px solid rgba(99,102,241,0.3);
+      background: var(--card); border: 1px solid var(--border);
       border-radius: 16px; padding: 24px; line-height: 1.7;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      box-shadow: 0 8px 24px var(--card-shadow);
     }}
     .content p {{ margin: 0 0 12px; }}
     .content ul {{ padding-left: 20px; margin: 0 0 12px; }}
     .content li {{ margin-bottom: 6px; }}
+    #themeToggle {{ position:fixed; top:12px; right:12px; z-index:99999;
+      background:var(--card); border:1px solid var(--border); border-radius:50%;
+      width:36px; height:36px; cursor:pointer; font-size:18px; color:var(--text);
+      display:flex; align-items:center; justify-content:center; transition:all .3s; }}
+    #themeToggle:hover {{ border-color:var(--accent); }}
   </style>
 </head>
 <body>
+  <button id="themeToggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'">🌓</button>
   <div class="container">
     <h1>{title}</h1>
     <div class="meta">Generado por GenTab a partir de {len(self.tab_contexts)} pestañas</div>
@@ -522,7 +519,6 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
             return not (has_meaningful_text or has_structural_content)
         except Exception:
             return False
-
     def _build_local_summary_html(self) -> str:
         """Fallback local interactivo con búsqueda, filtros y vista grid/lista."""
         import json as _json
@@ -551,7 +547,6 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
                 "url": tc.url or "",
                 "excerpt": clean_text or "Sin contenido disponible.",
             })
-
         items_json = _json.dumps(items_data, ensure_ascii=False)
 
         return f"""<!DOCTYPE html>
@@ -562,15 +557,26 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
   <title>{title}</title>
   <style>
     :root {{ --bg:#0f0f23; --card:#1a1a3e; --text:#e2e8f0; --muted:#94a3b8;
-             --accent:#6366f1; --accent2:#818cf8; --border:rgba(99,102,241,0.3); }}
+             --accent:#6366f1; --accent2:#818cf8; --border:rgba(99,102,241,0.3);
+             --card-shadow:rgba(0,0,0,0.2);
+             --body-bg:radial-gradient(ellipse at 20% 0%,#1e1b4b,#0f0f23 60%); }}
+    [data-theme="light"] {{ --bg:#f8fafc; --card:#ffffff; --text:#1e293b; --muted:#64748b;
+             --accent:#4f46e5; --accent2:#6366f1; --border:rgba(99,102,241,0.2);
+             --card-shadow:rgba(0,0,0,0.08);
+             --body-bg:linear-gradient(135deg,#eef2ff,#f8fafc 60%); }}
     * {{ box-sizing:border-box; margin:0; }}
-    body {{ background:radial-gradient(ellipse at 20% 0%,#1e1b4b,#0f0f23 60%);
+    body {{ background:var(--body-bg);
             color:var(--text); font-family:system-ui,-apple-system,sans-serif; padding:24px; }}
     header {{ display:flex; flex-wrap:wrap; align-items:center; gap:12px;
               margin-bottom:20px; }}
     h1 {{ font-size:24px; flex:1; }}
     .toolbar {{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }}
-    .toolbar input {{ background:#1a1a3e; border:1px solid var(--border);
+    #themeToggle {{ position:fixed; top:12px; right:12px; z-index:99999;
+      background:var(--card); border:1px solid var(--border); border-radius:50%;
+      width:36px; height:36px; cursor:pointer; font-size:18px; color:var(--text);
+      display:flex; align-items:center; justify-content:center; transition:all .3s; }}
+    #themeToggle:hover {{ border-color:var(--accent); }}
+    .toolbar input {{ background:var(--card); border:1px solid var(--border);
                       border-radius:10px; padding:8px 14px; color:var(--text);
                       font-size:14px; width:220px; outline:none; }}
     .toolbar input:focus {{ border-color:var(--accent); }}
@@ -586,11 +592,11 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
     .list .card .card-body {{ flex:1; }}
     .card {{ background:var(--card); border:1px solid var(--border);
              border-radius:14px; padding:18px; transition:transform .2s,box-shadow .2s;
-             box-shadow:0 4px 16px rgba(0,0,0,0.2); }}
-    .card:hover {{ transform:translateY(-3px); box-shadow:0 12px 32px rgba(0,0,0,0.35); }}
+             box-shadow:0 4px 16px var(--card-shadow); }}
+    .card:hover {{ transform:translateY(-3px); box-shadow:0 12px 32px var(--card-shadow); }}
     .card h3 {{ font-size:16px; margin-bottom:6px; line-height:1.3; }}
     .card .domain {{ color:var(--accent2); font-size:12px; margin-bottom:8px; }}
-    .card p {{ color:#cbd5e1; font-size:13px; line-height:1.6;
+    .card p {{ color:var(--muted); font-size:13px; line-height:1.6;
                display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical;
                overflow:hidden; }}
     .card .actions {{ margin-top:12px; display:flex; gap:8px; }}
@@ -602,6 +608,7 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
   </style>
 </head>
 <body>
+  <button id="themeToggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'">🌓</button>
   <header>
     <h1>{title}</h1>
     <div class="toolbar">
@@ -679,6 +686,10 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
   border-top: 1px solid rgba(99,102,241,0.3);
   backdrop-filter: blur(10px);
 }
+[data-theme="light"] #gentab-badge-bar {
+  background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+  color: #3730a3; border-top-color: rgba(99,102,241,0.2);
+}
 #gentab-badge-bar .gentab-logo {
   background: linear-gradient(135deg, #6366f1, #818cf8);
   color: white; padding: 2px 8px; border-radius: 6px;
@@ -689,9 +700,11 @@ Start writing now. Output ONLY the HTML, starting with <!DOCTYPE html>."""
   padding: 2px 6px; border-radius: 4px;
   transition: all 0.2s;
 }
+[data-theme="light"] #gentab-badge-bar a { color: #4338ca; }
 #gentab-badge-bar a:hover {
   background: rgba(99,102,241,0.2); color: #e0e7ff;
 }
+[data-theme="light"] #gentab-badge-bar a:hover { color: #312e81; }
 body { padding-bottom: 36px !important; }
 </style>
 """
@@ -709,12 +722,28 @@ body { padding-bottom: 36px !important; }
   <span style="margin-left:auto;opacity:0.6;">Scrapelio Browser</span>
 </div>
 """
+        # Inyectar CSS de tema light como fallback si el LLM no lo incluyó
+        theme_fallback_css = ""
+        if '[data-theme="light"]' not in html:
+            theme_fallback_css = """
+<style id="gentab-theme-fallback">
+[data-theme="light"] { --bg:#f8fafc; --card:#ffffff; --text:#1e293b; --muted:#64748b;
+  --accent:#4f46e5; --accent2:#6366f1; --border:rgba(99,102,241,0.2);
+  --card-shadow:rgba(0,0,0,0.08);
+  --body-bg:linear-gradient(135deg,#eef2ff,#f8fafc 60%); }
+[data-theme="light"] body { background:var(--body-bg); color:var(--text); }
+</style>
+"""
+        # Inyectar toggle si no existe
+        toggle_html = ""
+        if 'themeToggle' not in html:
+            toggle_html = """<button id="themeToggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'" style="position:fixed;top:12px;right:12px;z-index:99999;background:var(--card,#1a1a3e);border:1px solid var(--border,rgba(99,102,241,0.3));border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:18px;color:var(--text,#e2e8f0);display:flex;align-items:center;justify-content:center;">🌓</button>
+"""
         if '</head>' in html:
-            html = html.replace('</head>', f'{badge_css}</head>')
+            html = html.replace('</head>', f'{theme_fallback_css}{badge_css}</head>')
         if '</body>' in html:
-            html = html.replace('</body>', f'{badge_html}</body>')
+            html = html.replace('</body>', f'{toggle_html}{badge_html}</body>')
         return html
-
     def _generate_title(self, raw: str) -> str:
         if '<title>' in raw and '</title>' in raw:
             start = raw.index('<title>') + 7
@@ -723,7 +752,6 @@ body { padding-bottom: 36px !important; }
                 title = raw[start:end].strip()
                 if title:
                     return title
-
         words = self.prompt.split()
         return ' '.join(words[:6]).capitalize() + ('...' if len(words) > 6 else '')
 
@@ -743,7 +771,6 @@ class GenTabEngine(QObject):
         self.history: List[GenTabResult] = []
         self._worker: Optional[GenTabWorker] = None
         self._load_history()
-
     def extract_all_tabs_context(self, tab_manager) -> Tuple[List[TabContext], int]:
         """Extrae contexto de todas las pestañas abiertas. Retorna (contextos, pending_count)."""
         contexts: List[TabContext] = []
@@ -753,15 +780,12 @@ class GenTabEngine(QObject):
             browser = tab_manager.tabs.widget(i)
             if not browser:
                 continue
-
             url = browser.url().toString()
             if not url or url in ('about:blank', 'about:gentab'):
                 continue
-
             title = ""
             if hasattr(browser, 'page') and browser.page():
                 title = browser.page().title() or ""
-
             domain = ContentExtractor.get_domain(url)
 
             ctx = TabContext(
@@ -774,9 +798,7 @@ class GenTabEngine(QObject):
             )
             contexts.append(ctx)
             pending += 1
-
         return contexts, pending
-
     def extract_tab_html(self, browser, tab_context: TabContext, callback):
         """Extrae HTML de una pestaña individual de forma asíncrona."""
         def on_html(html):
@@ -790,13 +812,11 @@ class GenTabEngine(QObject):
                 tab_context.content = f"[Error extracting: {e}]"
                 tab_context.content_length = 0
             callback(tab_context)
-
         if hasattr(browser, 'page') and browser.page():
             browser.page().toHtml(on_html)
         else:
             tab_context.content = "[No page available]"
             callback(tab_context)
-
     def generate_gentab(self, server_url: str, prompt: str,
                         tab_contexts: List[TabContext],
                         temperature: float = 0.7,
@@ -806,12 +826,10 @@ class GenTabEngine(QObject):
         if self._worker and self._worker.isRunning():
             self.gentab_error.emit("Ya hay una generación en curso.")
             return
-
         valid = [tc for tc in tab_contexts if tc.content and tc.content_length > 0]
         if not valid:
             self.gentab_error.emit("No hay contenido extraído de las pestañas.")
             return
-
         self._worker = GenTabWorker(
             server_url, prompt, valid, temperature, max_tokens,
             llm_config=llm_config
@@ -822,21 +840,17 @@ class GenTabEngine(QObject):
 
         self.gentab_started.emit()
         self._worker.start()
-
     def _on_generation_complete(self, result: GenTabResult):
         self.history.insert(0, result)
         if len(self.history) > 50:
             self.history = self.history[:50]
         self._save_history()
         self.gentab_completed.emit(result)
-
     def get_history(self) -> List[GenTabResult]:
         return self.history
-
     def clear_history(self):
         self.history.clear()
         self._save_history()
-
     def _save_history(self):
         try:
             data = []
@@ -854,7 +868,6 @@ class GenTabEngine(QObject):
             self.settings.setValue("history", json.dumps(data))
         except Exception as e:
             logger.error(f"Error saving GenTab history: {e}")
-
     def _load_history(self):
         try:
             raw = self.settings.value("history", "[]")

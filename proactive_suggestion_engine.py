@@ -80,7 +80,6 @@ class ProactiveSuggestionEngine(QObject):
         self._acceptances: Dict[str, int] = {}
         self._settings = QSettings("Scrapelio", "SuggestionEngine")
         self._load_history()
-
     # ── Generación ───────────────────────────────────────────────────────────
 
     def generate_suggestions(
@@ -91,7 +90,6 @@ class ProactiveSuggestionEngine(QObject):
         Args:
             session_analysis: Dict producido por
                 ``SessionContextAnalyzer.analyze_current_session``.
-
         Returns:
             Lista (potencialmente vacía) de ``SuggestionModel``.
         """
@@ -102,7 +100,6 @@ class ProactiveSuggestionEngine(QObject):
 
         if confidence < self.CONFIDENCE_THRESHOLD:
             return []
-
         suggestions: List[SuggestionModel] = []
 
         if intent == SessionIntent.RESEARCH:
@@ -114,7 +111,6 @@ class ProactiveSuggestionEngine(QObject):
                 action_payload={"intent": "research", "action": "summarize"},
                 confidence=confidence,
             ))
-
         elif intent == SessionIntent.SHOPPING:
             suggestions.append(SuggestionModel(
                 type=SuggestionType.COMPARE_PRODUCTS,
@@ -124,7 +120,6 @@ class ProactiveSuggestionEngine(QObject):
                 action_payload={"intent": "shopping", "action": "compare"},
                 confidence=confidence,
             ))
-
         elif intent == SessionIntent.CODING:
             suggestions.append(SuggestionModel(
                 type=SuggestionType.CREATE_DOC,
@@ -134,7 +129,6 @@ class ProactiveSuggestionEngine(QObject):
                 action_payload={"intent": "coding", "action": "document"},
                 confidence=confidence,
             ))
-
         elif intent == SessionIntent.NEWS:
             suggestions.append(SuggestionModel(
                 type=SuggestionType.SUMMARIZE_TABS,
@@ -144,7 +138,6 @@ class ProactiveSuggestionEngine(QObject):
                 action_payload={"intent": "news", "action": "briefing"},
                 confidence=confidence,
             ))
-
         elif intent == SessionIntent.TRAVEL:
             suggestions.append(SuggestionModel(
                 type=SuggestionType.CREATE_GENTAB,
@@ -154,7 +147,6 @@ class ProactiveSuggestionEngine(QObject):
                 action_payload={"intent": "travel", "action": "itinerary"},
                 confidence=confidence,
             ))
-
         elif intent == SessionIntent.ENTERTAINMENT:
             suggestions.append(SuggestionModel(
                 type=SuggestionType.CREATE_GENTAB,
@@ -164,7 +156,6 @@ class ProactiveSuggestionEngine(QObject):
                 action_payload={"intent": "entertainment", "action": "playlist"},
                 confidence=confidence,
             ))
-
         # Sugerencia genérica si hay muchas pestañas del mismo dominio
         if tab_count > 5:
             domain_counts = {}
@@ -180,7 +171,6 @@ class ProactiveSuggestionEngine(QObject):
                     action_payload={"action": "group", "domain": top_domain},
                     confidence=min(1.0, domain_counts[top_domain] / tab_count),
                 ))
-
         # Sugerencia GenTab si hay contenido suficiente
         if tab_count >= 3 and intent != SessionIntent.GENERAL:
             suggestions.append(SuggestionModel(
@@ -191,16 +181,13 @@ class ProactiveSuggestionEngine(QObject):
                 action_payload={"intent": intent.value, "action": "gentab"},
                 confidence=confidence * 0.9,
             ))
-
         filtered = [s for s in suggestions if self.should_show_suggestion(s.type)]
         filtered.sort(key=lambda s: s.confidence, reverse=True)
         result = filtered[:2]
 
         if result:
             self.suggestions_ready.emit(result)
-
         return result
-
     def should_show_suggestion(
         self, suggestion_type: SuggestionType, user_history: Optional[Dict] = None,
     ) -> bool:
@@ -209,23 +196,18 @@ class ProactiveSuggestionEngine(QObject):
         Args:
             suggestion_type: Tipo de sugerencia.
             user_history: Historial del usuario (no usado actualmente).
-
         Returns:
             ``True`` si la sugerencia puede mostrarse.
         """
         if self._suggestions_shown >= self.MAX_SUGGESTIONS_PER_SESSION:
             return False
-
         key = suggestion_type.value
         last = self._last_shown.get(key, 0)
         if time.time() - last < self.SUGGESTION_COOLDOWN:
             return False
-
         if self._dismissals.get(key, 0) >= 3:
             return False
-
         return True
-
     def record_dismissal(self, suggestion_type: SuggestionType) -> None:
         """Registra que el usuario descartó una sugerencia.
 
@@ -237,7 +219,6 @@ class ProactiveSuggestionEngine(QObject):
         self._last_shown[key] = time.time()
         self._save_history()
         logger.info("Sugerencia '%s' descartada (%d veces)", key, self._dismissals[key])
-
     def record_acceptance(self, suggestion_type: SuggestionType) -> None:
         """Registra que el usuario aceptó una sugerencia.
 
@@ -250,18 +231,15 @@ class ProactiveSuggestionEngine(QObject):
         self._last_shown[key] = time.time()
         self._save_history()
         logger.info("Sugerencia '%s' aceptada (%d veces)", key, self._acceptances[key])
-
     def reset_session(self) -> None:
         """Reinicia contadores de sesión (no persistentes)."""
         self._suggestions_shown = 0
         self._last_shown.clear()
-
     # ── Persistencia ─────────────────────────────────────────────────────────
 
     def _save_history(self) -> None:
         self._settings.setValue("dismissals", self._dismissals)
         self._settings.setValue("acceptances", self._acceptances)
-
     def _load_history(self) -> None:
         self._dismissals = self._settings.value("dismissals", {}) or {}
         self._acceptances = self._settings.value("acceptances", {}) or {}
@@ -289,7 +267,6 @@ class SuggestionToast(QFrame):
         self._current: Optional[SuggestionModel] = None
         self._setup_ui()
         self.hide()
-
     def _setup_ui(self) -> None:
         self.setObjectName("suggestionToast")
         self.setFrameShape(QFrame.StyledPanel)
@@ -377,7 +354,6 @@ class SuggestionToast(QFrame):
         self._auto_hide_timer = QTimer(self)
         self._auto_hide_timer.setSingleShot(True)
         self._auto_hide_timer.timeout.connect(self._fade_out)
-
     # ── API pública ──────────────────────────────────────────────────────────
 
     def show_suggestion(self, suggestion: SuggestionModel) -> None:
@@ -395,7 +371,6 @@ class SuggestionToast(QFrame):
         self.show()
         self.raise_()
         self._auto_hide_timer.start(self.AUTO_HIDE_MS)
-
     def _position_toast(self) -> None:
         """Posiciona el toast en la esquina superior derecha del padre."""
         parent = self.parentWidget()
@@ -403,7 +378,6 @@ class SuggestionToast(QFrame):
             x = parent.width() - self.width() - 20
             y = 60
             self.move(x, y)
-
     # ── Slots privados ───────────────────────────────────────────────────────
 
     def _on_accept(self) -> None:
@@ -411,12 +385,10 @@ class SuggestionToast(QFrame):
             self.action_clicked.emit(self._current)
         self._auto_hide_timer.stop()
         self.hide()
-
     def _on_dismiss(self) -> None:
         if self._current:
             self.dismissed.emit(self._current)
         self._auto_hide_timer.stop()
         self.hide()
-
     def _fade_out(self) -> None:
         self.hide()

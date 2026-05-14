@@ -104,13 +104,11 @@ class IntentDetector:
 
         Args:
             domains: Lista de dominios de las pestañas abiertas.
-
         Returns:
             Tupla ``(intent, confidence)``.
         """
         if not domains:
             return SessionIntent.GENERAL, 0.0
-
         scores: Counter = Counter()
         for domain in domains:
             domain_lower = domain.lower()
@@ -119,21 +117,17 @@ class IntentDetector:
                     if pattern in domain_lower:
                         scores[intent_key] += 1
                         break
-
         return self._pick_winner(scores, len(domains))
-
     def detect_from_titles(self, titles: List[str]) -> Tuple[SessionIntent, float]:
         """Detecta intención a partir de los títulos de las pestañas.
 
         Args:
             titles: Lista de títulos de pestañas.
-
         Returns:
             Tupla ``(intent, confidence)``.
         """
         if not titles:
             return SessionIntent.GENERAL, 0.0
-
         scores: Counter = Counter()
         joined = " ".join(titles).lower()
         for intent_key, keywords in self.TITLE_KEYWORDS.items():
@@ -141,9 +135,7 @@ class IntentDetector:
                 count = joined.count(keyword.lower())
                 if count > 0:
                     scores[intent_key] += count
-
         return self._pick_winner(scores, max(len(titles), 1))
-
     def detect_hybrid(
         self,
         tab_contexts: List[Any],
@@ -155,7 +147,6 @@ class IntentDetector:
 
         Args:
             tab_contexts: Contextos de pestañas.
-
         Returns:
             Tupla ``(intent, confidence)``.
         """
@@ -168,16 +159,13 @@ class IntentDetector:
         if domain_conf >= title_conf:
             combined_conf = min(1.0, domain_conf * 0.6 + title_conf * 0.4)
             return domain_intent, combined_conf
-
         combined_conf = min(1.0, title_conf * 0.6 + domain_conf * 0.4)
         return title_intent, combined_conf
-
     @staticmethod
     def _pick_winner(scores: Counter, total: int) -> Tuple[SessionIntent, float]:
         """Selecciona la intención ganadora del contador de scores."""
         if not scores:
             return SessionIntent.GENERAL, 0.0
-
         best_key, best_count = scores.most_common(1)[0]
         confidence = min(1.0, best_count / max(total, 1))
 
@@ -186,7 +174,6 @@ class IntentDetector:
         except ValueError:
             intent = SessionIntent.GENERAL
             confidence = 0.0
-
         return intent, round(confidence, 3)
 
 
@@ -217,13 +204,11 @@ class SessionContextAnalyzer(QObject):
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._detector = IntentDetector()
-
     def analyze_current_session(self, tab_manager: Any) -> Dict[str, Any]:
         """Analiza las pestañas abiertas en el ``TabManager``.
 
         Args:
             tab_manager: Instancia de ``tabs.TabManager``.
-
         Returns:
             Dict con claves ``intent``, ``confidence``, ``tab_count``,
             ``domains``, ``related_tabs``, ``suggested_action``.
@@ -233,7 +218,6 @@ class SessionContextAnalyzer(QObject):
             result = self._empty_result()
             self.analysis_ready.emit(result)
             return result
-
         domains = [info["domain"] for info in tabs_info]
         titles = [info["title"] for info in tabs_info]
 
@@ -246,7 +230,6 @@ class SessionContextAnalyzer(QObject):
         else:
             intent = title_intent
             confidence = min(1.0, title_conf * 0.6 + domain_conf * 0.4)
-
         related = self._find_related_tabs(tabs_info, intent)
 
         result: Dict[str, Any] = {
@@ -260,7 +243,6 @@ class SessionContextAnalyzer(QObject):
 
         self.analysis_ready.emit(result)
         return result
-
     def _extract_tabs_info(self, tab_manager: Any) -> List[Dict[str, str]]:
         """Extrae URL, título y dominio de cada pestaña."""
         from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -269,7 +251,6 @@ class SessionContextAnalyzer(QObject):
         tabs_widget = getattr(tab_manager, "tabs", None)
         if tabs_widget is None:
             return info_list
-
         for i in range(tabs_widget.count()):
             widget = tabs_widget.widget(i)
             if not isinstance(widget, QWebEngineView):
@@ -288,7 +269,6 @@ class SessionContextAnalyzer(QObject):
                 "domain": domain,
             })
         return info_list
-
     def _find_related_tabs(
         self,
         tabs_info: List[Dict[str, str]],
@@ -305,7 +285,6 @@ class SessionContextAnalyzer(QObject):
             if match:
                 related.append(info["index"])
         return related
-
     @staticmethod
     def _empty_result() -> Dict[str, Any]:
         return {

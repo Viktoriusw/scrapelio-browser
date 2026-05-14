@@ -55,13 +55,11 @@ class ContentChunker:
 
         Args:
             html_text: Texto limpio extraído del HTML.
-
         Returns:
             Lista de strings de tamaño ≤ CHUNK_SIZE.
         """
         if not html_text or not html_text.strip():
             return []
-
         text = html_text.strip()
         chunks: List[str] = []
         start = 0
@@ -72,7 +70,6 @@ class ContentChunker:
                 chunks.append(chunk.strip())
             start += cls.CHUNK_SIZE - cls.CHUNK_OVERLAP
         return chunks
-
     @classmethod
     def chunk_by_headings(cls, html_text: str) -> List[str]:
         """Divide por encabezados (H1-H3) detectados como ``[H1]``, ``[H2]``, etc.
@@ -83,13 +80,11 @@ class ContentChunker:
 
         Args:
             html_text: Texto limpio con marcadores ``[H1]``, ``[H2]``, ``[H3]``.
-
         Returns:
             Lista de chunks.
         """
         if not html_text or not html_text.strip():
             return []
-
         heading_pattern = re.compile(r'\[H[1-3]\]')
         parts = heading_pattern.split(html_text)
         chunks: List[str] = []
@@ -121,11 +116,9 @@ class EmbeddingProvider:
         self._model_name = model_name or self.DEFAULT_MODEL
         self._model: Optional["SentenceTransformer"] = None
         self._available = _SENTENCE_TRANSFORMERS_OK
-
     @property
     def available(self) -> bool:
         return self._available
-
     def _ensure_model(self) -> None:
         """Lazy-load del modelo de embeddings."""
         if self._model is not None:
@@ -138,25 +131,21 @@ class EmbeddingProvider:
         except Exception as exc:
             self._available = False
             raise RuntimeError(f"No se pudo cargar el modelo: {exc}") from exc
-
     def encode(self, texts: List[str]) -> np.ndarray:
         """Codifica una lista de textos en vectores.
 
         Args:
             texts: Textos a codificar.
-
         Returns:
             ndarray de shape ``(len(texts), dim)``.
         """
         self._ensure_model()
         return self._model.encode(texts, show_progress_bar=False)  # type: ignore[union-attr]
-
     def encode_single(self, text: str) -> np.ndarray:
         """Codifica un solo texto.
 
         Args:
             text: Texto a codificar.
-
         Returns:
             ndarray de shape ``(dim,)``.
         """
@@ -192,7 +181,6 @@ class ContextVectorStore:
             self._init_chromadb()
         else:
             logger.info("Vector store en modo fallback (memoria)")
-
     def _init_chromadb(self) -> None:
         """Inicializa ChromaDB persistente."""
         try:
@@ -210,7 +198,6 @@ class ContextVectorStore:
         except Exception as exc:
             logger.warning("ChromaDB no disponible, fallback a memoria: %s", exc)
             self._use_chromadb = False
-
     # ── API pública ──────────────────────────────────────────────────────────
 
     def add_tab_context(
@@ -230,7 +217,6 @@ class ContextVectorStore:
         """
         if not content_chunks:
             return
-
         self.delete_tab(tab_id)
 
         if self._use_chromadb and self._collection is not None:
@@ -248,28 +234,24 @@ class ContextVectorStore:
                 return
             except Exception as exc:
                 logger.warning("Error al indexar en ChromaDB: %s", exc)
-
         embeddings = None
         if self._embedding_provider.available:
             try:
                 embeddings = self._embedding_provider.encode(content_chunks)
             except Exception:
                 pass
-
         self._mem_store[tab_id] = {
             "url": url,
             "title": title,
             "chunks": content_chunks,
             "embeddings": embeddings,
         }
-
     def search(self, query: str, top_k: int = 5) -> List[Dict]:
         """Busca los chunks más relevantes para una query.
 
         Args:
             query: Texto de búsqueda.
             top_k: Número máximo de resultados.
-
         Returns:
             Lista de dicts con keys ``tab_id``, ``url``, ``title``,
             ``chunk``, ``score``.
@@ -296,9 +278,7 @@ class ContextVectorStore:
                 return output
             except Exception as exc:
                 logger.warning("Error en búsqueda ChromaDB: %s", exc)
-
         return self._search_memory(query, top_k)
-
     def _search_memory(self, query: str, top_k: int) -> List[Dict]:
         """Búsqueda fallback en memoria (coseno o keywords)."""
         query_emb = None
@@ -307,7 +287,6 @@ class ContextVectorStore:
                 query_emb = self._embedding_provider.encode_single(query)
             except Exception:
                 pass
-
         results: List[Dict] = []
         for tab_id, data in self._mem_store.items():
             chunks = data["chunks"]
@@ -321,7 +300,6 @@ class ContextVectorStore:
                     ))
                 else:
                     score = self._keyword_score(query, chunk)
-
                 results.append({
                     "tab_id": tab_id,
                     "url": data["url"],
@@ -329,10 +307,8 @@ class ContextVectorStore:
                     "chunk": chunk,
                     "score": score,
                 })
-
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:top_k]
-
     @staticmethod
     def _keyword_score(query: str, text: str) -> float:
         """Score simple basado en keywords cuando no hay embeddings."""
@@ -342,7 +318,6 @@ class ContextVectorStore:
             return 0.0
         matches = sum(1 for w in query_words if w in text_lower)
         return matches / len(query_words)
-
     def delete_tab(self, tab_id: str) -> None:
         """Elimina todos los chunks de una pestaña.
 
@@ -354,9 +329,7 @@ class ContextVectorStore:
                 self._collection.delete(where={"tab_id": tab_id})
             except Exception as exc:
                 logger.debug("Error al eliminar de ChromaDB: %s", exc)
-
         self._mem_store.pop(tab_id, None)
-
     def clear(self) -> None:
         """Elimina todo el contenido indexado."""
         if self._use_chromadb and self._client is not None:
@@ -368,9 +341,7 @@ class ContextVectorStore:
                 )
             except Exception as exc:
                 logger.warning("Error al limpiar ChromaDB: %s", exc)
-
         self._mem_store.clear()
-
     @property
     def tab_count(self) -> int:
         """Número de pestañas indexadas."""
@@ -407,7 +378,6 @@ class IndexWorker(QThread):
         self._url = url
         self._title = title
         self._html = html_content
-
     def run(self) -> None:
         try:
             from gentab_engine import ContentExtractor

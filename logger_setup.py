@@ -67,7 +67,6 @@ class MemoryLogHandler(logging.Handler):
         super().__init__()
         self._records: Deque[logging.LogRecord] = deque(maxlen=maxlen)
         self._lock = threading.Lock()
-
     def emit(self, record: logging.LogRecord) -> None:
         try:
             with self._lock:
@@ -76,12 +75,10 @@ class MemoryLogHandler(logging.Handler):
             sigs.new_record.emit(record)
         except Exception:
             self.handleError(record)
-
     def get_records(self, level: int = logging.DEBUG) -> List[logging.LogRecord]:
         """Devuelve copia filtrada por nivel mínimo."""
         with self._lock:
             return [r for r in self._records if r.levelno >= level]
-
     def clear(self) -> None:
         with self._lock:
             self._records.clear()
@@ -126,10 +123,8 @@ def setup_logging(level: str = "DEBUG") -> None:
 
     Llama a esta función una sola vez al inicio de ``main.py`` en lugar de
     ``logging.basicConfig``.  Después, todos los módulos hacen simplemente::
-
         import logging
         _log = logging.getLogger(__name__)
-
     Args:
         level: Nivel mínimo de logging (``"DEBUG"``, ``"INFO"``, etc.).
     """
@@ -166,7 +161,6 @@ def setup_logging(level: str = "DEBUG") -> None:
         root.addHandler(file_h)
     except Exception as exc:
         print(f"[logger_setup] No se pudo abrir el fichero de log: {exc}", file=sys.stderr)
-
     # ── Handler en memoria ────────────────────────────────────────────────────
     memory_handler = MemoryLogHandler()
     memory_handler.setLevel(logging.DEBUG)
@@ -189,7 +183,6 @@ def setup_logging(level: str = "DEBUG") -> None:
             "EXCEPCIÓN NO CAPTURADA:\n%s",
             "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
         )
-
     sys.excepthook = _excepthook
 
     # ── Excepciones no capturadas en threads secundarios ─────────────────────
@@ -199,7 +192,6 @@ def setup_logging(level: str = "DEBUG") -> None:
             getattr(args.thread, "name", "?"),
             "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_tb)),
         )
-
     threading.excepthook = _threading_excepthook
 
     # ── Mensajes Qt → logging ─────────────────────────────────────────────────
@@ -262,7 +254,6 @@ def _install_qt_message_handler() -> None:
             if context.file:
                 location = f" [{context.file}:{context.line}]"
             _qt_log.log(level, "%s%s", message, location)
-
         qInstallMessageHandler(_qt_handler)
     except Exception as exc:
         logging.getLogger(__name__).debug(

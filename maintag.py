@@ -11,22 +11,15 @@ from urllib.parse import urlparse
 import logging
 
 
-
 class BookmarkDialog(QDialog):
-
     def __init__(self, parent=None, values=None):
-
         super().__init__(parent)
 
         self.setWindowTitle("Add Bookmark" if not values else "Edit Bookmark")
 
         self.setModal(True)
 
-        
-
         layout = QVBoxLayout(self)
-
-        
 
         # Title
 
@@ -37,14 +30,10 @@ class BookmarkDialog(QDialog):
         self.title_edit = QLineEdit()
 
         if values:
-
             self.title_edit.setText(values[0])
-
         title_layout.addWidget(self.title_edit)
 
         layout.addLayout(title_layout)
-
-        
 
         # URL
 
@@ -55,14 +44,10 @@ class BookmarkDialog(QDialog):
         self.url_edit = QLineEdit()
 
         if values:
-
             self.url_edit.setText(values[1])
-
         url_layout.addWidget(self.url_edit)
 
         layout.addLayout(url_layout)
-
-        
 
         # Category
 
@@ -73,14 +58,10 @@ class BookmarkDialog(QDialog):
         self.category_combo = QComboBox()
 
         if values:
-
             self.category_combo.addItem(values[2])
-
         category_layout.addWidget(self.category_combo)
 
         layout.addLayout(category_layout)
-
-        
 
         # Tags
 
@@ -91,14 +72,10 @@ class BookmarkDialog(QDialog):
         self.tags_edit = QLineEdit()
 
         if values:
-
             self.tags_edit.setText(values[3])
-
         tags_layout.addWidget(self.tags_edit)
 
         layout.addLayout(tags_layout)
-
-        
 
         # Notes
 
@@ -109,14 +86,10 @@ class BookmarkDialog(QDialog):
         self.notes_edit = QTextEdit()
 
         if values and len(values) > 4:
-
             self.notes_edit.setPlainText(values[4])
-
         notes_layout.addWidget(self.notes_edit)
 
         layout.addLayout(notes_layout)
-
-        
 
         # Buttons
 
@@ -135,11 +108,7 @@ class BookmarkDialog(QDialog):
         button_layout.addWidget(cancel_button)
 
         layout.addLayout(button_layout)
-
-
-
     def get_values(self):
-
         return (
 
             self.title_edit.text(),
@@ -151,15 +120,11 @@ class BookmarkDialog(QDialog):
             self.tags_edit.text(),
 
             self.notes_edit.toPlainText()
-
         )
 
 
-
 class BookmarkManager(QWidget):
-
     def __init__(self, parent=None):
-
         super().__init__(parent)
 
         self.favicon_cache = {}
@@ -171,20 +136,12 @@ class BookmarkManager(QWidget):
         self.init_database()
 
         self.load_bookmarks()
-
-
-
     def init_ui(self):
-
         layout = QVBoxLayout(self)
-
-        
 
         # Toolbar
 
         toolbar = QHBoxLayout()
-
-        
 
         # Add Bookmark button
 
@@ -194,8 +151,6 @@ class BookmarkManager(QWidget):
 
         toolbar.addWidget(add_bookmark_btn)
 
-        
-
         # Add Folder button
 
         add_folder_btn = QPushButton("Add Folder")
@@ -204,8 +159,6 @@ class BookmarkManager(QWidget):
 
         toolbar.addWidget(add_folder_btn)
 
-
-
         # View Categories button
 
         view_categories_btn = QPushButton("View Categories")
@@ -213,8 +166,6 @@ class BookmarkManager(QWidget):
         view_categories_btn.clicked.connect(self.show_categories)
 
         toolbar.addWidget(view_categories_btn)
-
-
 
         # Search bar con estilo moderno
 
@@ -225,14 +176,10 @@ class BookmarkManager(QWidget):
         self.search_bar.setFixedHeight(32)  # Altura consistente con la modernización
 
         if hasattr(self.search_bar, "setClearButtonEnabled"):
-
             self.search_bar.setClearButtonEnabled(True)
-
         self.search_bar.textChanged.connect(self.search_bookmarks)
 
         toolbar.addWidget(self.search_bar)
-
-        
 
         # Tag filter
 
@@ -246,8 +193,6 @@ class BookmarkManager(QWidget):
 
         tag_filter_layout.addWidget(self.tag_filter)
 
-        
-
         # Add new tag button
 
         add_tag_button = QPushButton("+")
@@ -260,15 +205,9 @@ class BookmarkManager(QWidget):
 
         tag_filter_layout.addWidget(add_tag_button)
 
-        
-
         toolbar.addLayout(tag_filter_layout)
 
-        
-
         layout.addLayout(toolbar)
-
-        
 
         # Tree widget for bookmarks
 
@@ -292,8 +231,6 @@ class BookmarkManager(QWidget):
 
         self.tree.customContextMenuRequested.connect(self.show_context_menu)
 
-
-
         # Estilo para tema claro: fondo claro y texto oscuro
 
         self.tree.setStyleSheet("""
@@ -301,36 +238,22 @@ class BookmarkManager(QWidget):
             QTreeWidget {
 
                 background-color: #f5f5f5;
-
                 color: #111111;
-
             }
 
             QHeaderView::section {
 
                 background-color: #e0e0e0;
-
                 color: #111111;
-
             }
-
         """)
 
-
-
         layout.addWidget(self.tree)
-
-
-
     def init_database(self):
-
         try:
-
             self.conn = sqlite3.connect('bookmarks.db')
 
             self.cursor = self.conn.cursor()
-
-            
 
             # Create tables
 
@@ -349,12 +272,8 @@ class BookmarkManager(QWidget):
                     notes TEXT,
 
                     tags TEXT
-
                 )
-
             ''')
-
-            
 
             self.cursor.execute('''
 
@@ -363,12 +282,8 @@ class BookmarkManager(QWidget):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
                     name TEXT UNIQUE NOT NULL
-
                 )
-
             ''')
-
-            
 
             # Insert initial categories
 
@@ -379,61 +294,37 @@ class BookmarkManager(QWidget):
                 "Design Inspiration", "Interior", "Interface", "Icons",
 
                 "Apps", "Home", "Buy", "Movies", "Plan next trip"
-
             ]
 
-            
-
             for category in initial_categories:
-
                 try:
-
                     self.cursor.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (category,))
-
                 except sqlite3.Error:
-
                     continue
-
-            
-
             self.conn.commit()
-
         except sqlite3.Error as e:
-
             QMessageBox.critical(self, "Database Error", f"Error initializing database: {str(e)}")
-
-
-
     def get_favicon(self, url):
-
         """Obtiene el favicon de una URL (sin bloquear)"""
 
         from favorites_bar import get_favicon_pixmap
 
         return get_favicon_pixmap(url, self.favicon_cache)
-
-
-
     def load_bookmarks(self):
-
         self.tree.clear()
 
         try:
-
             # First, get all categories
 
             self.cursor.execute("SELECT name FROM categories ORDER BY name")
 
             categories = self.cursor.fetchall()
 
-            
-
             # Create category items
 
             category_items = {}
 
             for category in categories:
-
                 category_name = category[0]
 
                 category_item = QTreeWidgetItem(self.tree)
@@ -443,26 +334,18 @@ class BookmarkManager(QWidget):
                 category_item.setExpanded(True)
 
                 category_items[category_name] = category_item
-
-            
-
             # Load bookmarks under their categories
 
             self.cursor.execute("SELECT id, title, url, category, tags, notes FROM bookmarks ORDER BY title")
 
             for bookmark in self.cursor.fetchall():
-
                 item = QTreeWidgetItem(category_items.get(bookmark[3], self.tree))
-
-                
 
                 # Set favicon
 
                 favicon = self.get_favicon(bookmark[2])
 
                 item.setIcon(0, QIcon(favicon))
-
-                
 
                 item.setText(0, bookmark[1])  # Title
 
@@ -475,34 +358,20 @@ class BookmarkManager(QWidget):
                 item.setText(4, bookmark[5] if bookmark[5] else "")  # Notes
 
                 item.setData(0, Qt.UserRole, bookmark[0])  # Store ID
-
-                
-
             # Update tag filter
 
             self.update_tag_filter()
-
-                
-
         except sqlite3.Error as e:
-
             QMessageBox.critical(self, "Database Error", f"Error loading bookmarks: {str(e)}")
-
-
-
     def update_tag_filter(self):
-
         """Actualiza el filtro de tags"""
 
         try:
-
             current_tag = self.tag_filter.currentData()
 
             self.tag_filter.clear()
 
             self.tag_filter.addItem("All Tags", "")
-
-            
 
             # Get all unique tags
 
@@ -511,159 +380,99 @@ class BookmarkManager(QWidget):
             tags = set()
 
             for row in self.cursor.fetchall():
-
                 if row[0]:
-
                     tags.update(tag.strip() for tag in row[0].split(','))
-
-            
-
             # Add tags to filter
 
             for tag in sorted(tags):
-
                 self.tag_filter.addItem(tag, tag)
-
-            
-
             # Restore previous selection
 
             if current_tag:
-
                 index = self.tag_filter.findData(current_tag)
 
                 if index >= 0:
-
                     self.tag_filter.setCurrentIndex(index)
-
-                    
-
         except sqlite3.Error as e:
-
             self.logger.error("Error updating tag filter: %s", e)
-
-
-
     def filter_by_tag(self):
-
         """Filtra los marcadores por tag seleccionado"""
 
         selected_tag = self.tag_filter.currentData()
 
         if not selected_tag:
-
             # Show all bookmarks
 
             for i in range(self.tree.topLevelItemCount()):
-
                 item = self.tree.topLevelItem(i)
 
                 item.setHidden(False)
 
                 for j in range(item.childCount()):
-
                     item.child(j).setHidden(False)
-
         else:
-
             # Filter by tag
 
             for i in range(self.tree.topLevelItemCount()):
-
                 item = self.tree.topLevelItem(i)
 
                 show_category = False
 
                 for j in range(item.childCount()):
-
                     child = item.child(j)
 
                     tags = child.text(3).split(',')
 
                     if selected_tag in [tag.strip() for tag in tags]:
-
                         child.setHidden(False)
 
                         show_category = True
-
                     else:
-
                         child.setHidden(True)
-
                 item.setHidden(not show_category)
-
-
-
     def add_bookmark(self):
-
         dialog = BookmarkDialog(self)
 
         if dialog.exec():
-
             title, url, category, tags, notes = dialog.get_values()
 
             try:
-
                 self.cursor.execute(
 
                     "INSERT INTO bookmarks (title, url, category, tags, notes) VALUES (?, ?, ?, ?, ?)",
 
                     (title, url, category, tags, notes)
-
                 )
 
                 self.conn.commit()
 
                 self.load_bookmarks()
-
             except sqlite3.Error as e:
-
                 QMessageBox.critical(self, "Database Error", f"Error adding bookmark: {str(e)}")
-
-
-
     def add_category(self):
-
         category, ok = QInputDialog.getText(self, "Add Category", "Category Name:")
 
         if ok and category:
-
             try:
-
                 self.cursor.execute("INSERT INTO categories (name) VALUES (?)", (category,))
 
                 self.conn.commit()
 
                 QMessageBox.information(self, "Success", f"Category '{category}' added successfully!")
-
             except sqlite3.IntegrityError:
-
                 QMessageBox.warning(self, "Error", "This category already exists.")
-
             except sqlite3.Error as e:
-
                 QMessageBox.critical(self, "Database Error", f"Error adding category: {str(e)}")
-
-
-
     def show_categories(self):
-
         try:
-
             self.cursor.execute("SELECT name FROM categories ORDER BY name")
 
             categories = self.cursor.fetchall()
 
-            
-
             if not categories:
-
                 QMessageBox.information(self, "Categories", "No categories found.")
 
                 return
-
-                
-
             # Create dialog to show categories
 
             dialog = QDialog(self)
@@ -672,11 +481,7 @@ class BookmarkManager(QWidget):
 
             dialog.setModal(True)
 
-            
-
             layout = QVBoxLayout(dialog)
-
-            
 
             # Add list widget to show categories
 
@@ -686,10 +491,7 @@ class BookmarkManager(QWidget):
 
             list_widget.setColumnWidth(0, 200)
 
-            
-
             for category in categories:
-
                 category_name = category[0]
 
                 # Get bookmark count for this category
@@ -698,19 +500,12 @@ class BookmarkManager(QWidget):
 
                 count = self.cursor.fetchone()[0]
 
-                
-
                 item = QTreeWidgetItem(list_widget)
 
                 item.setText(0, category_name)
 
                 item.setText(1, str(count))
-
-            
-
             layout.addWidget(list_widget)
-
-            
 
             # Add close button
 
@@ -720,64 +515,38 @@ class BookmarkManager(QWidget):
 
             layout.addWidget(close_btn)
 
-            
-
             dialog.exec()
-
-            
-
         except sqlite3.Error as e:
-
             QMessageBox.critical(self, "Database Error", f"Error loading categories: {str(e)}")
-
-
-
     def on_double_click(self, item, column):
-
         url = item.text(1)  # URL is in column 1
 
         if url:
-
             # Get the parent window (BrowserUI)
 
             parent = self.parent()
 
             while parent and not isinstance(parent, QMainWindow):
-
                 parent = parent.parent()
-
-            
-
             if parent and hasattr(parent, 'tab_manager'):
-
                 # Get the current tab
 
                 current_tab = parent.tab_manager.tabs.currentWidget()
 
                 if current_tab:
-
                     # Load the URL in the current tab
 
                     current_tab.setUrl(QUrl(url))
-
                 else:
-
                     # If no current tab, create a new one
 
                     parent.tab_manager.add_new_tab(url)
-
             else:
-
                 QMessageBox.warning(self, "Error", "Could not find browser window to load URL")
-
-
-
     def show_context_menu(self, position):
-
         item = self.tree.itemAt(position)
 
         if item:
-
             menu = QMenu()
 
             open_action = menu.addAction("Open")
@@ -786,28 +555,15 @@ class BookmarkManager(QWidget):
 
             delete_action = menu.addAction("Delete")
 
-            
-
             action = menu.exec(self.tree.mapToGlobal(position))
 
-            
-
             if action == open_action:
-
                 self.on_double_click(item, 0)
-
             elif action == edit_action:
-
                 self.edit_bookmark(item)
-
             elif action == delete_action:
-
                 self.delete_bookmark(item)
-
-
-
     def edit_bookmark(self, item):
-
         bookmark_id = item.data(0, Qt.UserRole)
 
         values = (item.text(0), item.text(1), item.text(2), item.text(3), item.text(4))
@@ -815,81 +571,54 @@ class BookmarkManager(QWidget):
         dialog = BookmarkDialog(self, values)
 
         if dialog.exec():
-
             title, url, category, tags, notes = dialog.get_values()
 
             try:
-
                 self.cursor.execute(
 
                     "UPDATE bookmarks SET title=?, url=?, category=?, tags=?, notes=? WHERE id=?",
 
                     (title, url, category, tags, notes, bookmark_id)
-
                 )
 
                 self.conn.commit()
 
                 self.load_bookmarks()
-
             except sqlite3.Error as e:
-
                 QMessageBox.critical(self, "Database Error", f"Error updating bookmark: {str(e)}")
-
-
-
     def delete_bookmark(self, item):
-
         reply = QMessageBox.question(self, "Confirm Delete", 
 
                                    "Are you sure you want to delete this bookmark?",
 
                                    QMessageBox.Yes | QMessageBox.No)
-
         if reply == QMessageBox.Yes:
-
             bookmark_id = item.data(0, Qt.UserRole)
 
             try:
-
                 self.cursor.execute("DELETE FROM bookmarks WHERE id=?", (bookmark_id,))
 
                 self.conn.commit()
 
                 self.load_bookmarks()
-
             except sqlite3.Error as e:
-
                 QMessageBox.critical(self, "Database Error", f"Error deleting bookmark: {str(e)}")
-
-
-
     def search_bookmarks(self, text):
-
         for i in range(self.tree.topLevelItemCount()):
-
             item = self.tree.topLevelItem(i)
 
             show = False
 
             for j in range(item.columnCount()):
-
                 if text.lower() in item.text(j).lower():
-
                     show = True
 
                     break
-
             item.setHidden(not show)
-
-
-
     def add_new_tag(self):
-
         """Añade un nuevo tag al sistema"""
 
         try:
-
             tag, ok = QInputDialog.getText(
 
                 self,
@@ -899,17 +628,12 @@ class BookmarkManager(QWidget):
                 "Enter new tag name:",
 
                 QLineEdit.Normal
-
             )
 
-            
-
             if ok and tag:
-
                 tag = tag.strip()
 
                 if tag:
-
                     # Verificar si el tag ya existe
 
                     self.cursor.execute("SELECT DISTINCT tags FROM bookmarks WHERE tags IS NOT NULL AND tags != ''")
@@ -917,61 +641,36 @@ class BookmarkManager(QWidget):
                     existing_tags = set()
 
                     for row in self.cursor.fetchall():
-
                         if row[0]:
-
                             existing_tags.update(tag.strip() for tag in row[0].split(','))
-
-                    
-
                     if tag in existing_tags:
-
                         QMessageBox.warning(self, "Warning", f"Tag '{tag}' already exists!")
 
                         return
-
-                    
-
                     # Añadir el tag al filtro
 
                     self.tag_filter.addItem(tag, tag)
 
                     self.tag_filter.setCurrentText(tag)
 
-                    
-
                     # Actualizar la base de datos si es necesario
 
                     # (Aquí podrías añadir una tabla específica para tags si lo prefieres)
 
-                    
-
                     QMessageBox.information(self, "Success", f"Tag '{tag}' added successfully!")
-
-                    
-
         except sqlite3.Error as e:
-
             QMessageBox.critical(self, "Database Error", f"Error adding new tag: {str(e)}")
-
         except Exception as e:
-
             QMessageBox.critical(self, "Error", f"Unexpected error: {str(e)}")
-
-
-
     def get_favorites_for_bar(self):
-
         """Devuelve una lista de favoritos marcados para mostrar en la barra de favoritos"""
 
         favs = []
 
         try:
-
             self.cursor.execute("SELECT title, url, notes, tags FROM bookmarks WHERE notes LIKE '%[barra]%' OR tags LIKE '%[barra]%' OR category LIKE '%Barra%' OR tags LIKE '%barra%' OR notes LIKE '%barra%'")
 
             for row in self.cursor.fetchall():
-
                 title, url, notes, tags = row
 
                 # Obtener favicon
@@ -985,15 +684,10 @@ class BookmarkManager(QWidget):
                     'title': title,
 
                     'icon': icon
-
                 })
-
         except Exception as e:
-
             print(f"Error getting favorites for bar: {str(e)}")
-
         return favs
-
     # ─── Métodos de carpetas (integración con FoldersManager) ─────────────────
 
     def add_bookmark_to_folder(self, url: str, title: str, folder_id: int = 1) -> bool:
@@ -1004,17 +698,14 @@ class BookmarkManager(QWidget):
             url: URL del sitio.
             title: Título del marcador.
             folder_id: ID de la carpeta destino (por defecto la raíz, id=1).
-
         Returns:
             True si se guardó correctamente.
         """
         if not url or not title:
             self.logger.error("add_bookmark_to_folder: URL y título son obligatorios")
             return False
-
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
-
         try:
             conn = sqlite3.connect("bookmarks.db")
             cursor = conn.cursor()
@@ -1038,7 +729,6 @@ class BookmarkManager(QWidget):
         except sqlite3.Error as e:
             self.logger.error("Error en add_bookmark_to_folder: %s", e)
             return False
-
     def move_bookmark_to_folder(self, bookmark_id: int, new_folder_id: int) -> bool:
         """Mueve un marcador existente a otra carpeta."""
         try:
@@ -1056,7 +746,6 @@ class BookmarkManager(QWidget):
         except sqlite3.Error as e:
             self.logger.error("Error moviendo marcador: %s", e)
             return False
-
     def get_bookmarks_by_folder(self, folder_id: int = 1) -> list:
         """Devuelve todos los marcadores de una carpeta ordenados por posición."""
         try:
@@ -1073,7 +762,6 @@ class BookmarkManager(QWidget):
         except sqlite3.Error as e:
             self.logger.error("Error obteniendo marcadores de carpeta %d: %s", folder_id, e)
             return []
-
     def delete_bookmark_by_id(self, bookmark_id: int) -> bool:
         """Elimina un marcador por su ID numérico."""
         try:
@@ -1087,7 +775,6 @@ class BookmarkManager(QWidget):
         except sqlite3.Error as e:
             self.logger.error("Error eliminando marcador %d: %s", bookmark_id, e)
             return False
-
     def search_bookmarks_text(self, query: str) -> list:
         """Busca marcadores por título o URL (sin importar carpeta)."""
         like = f"%{query}%"
@@ -1105,7 +792,6 @@ class BookmarkManager(QWidget):
         except sqlite3.Error as e:
             self.logger.error("Error buscando marcadores: %s", e)
             return []
-
     def export_bookmarks_html(self, output_path: str, folders_manager) -> bool:
         """
         Exporta todos los marcadores a un archivo HTML compatible con Firefox/Chrome.
@@ -1124,7 +810,6 @@ class BookmarkManager(QWidget):
         except Exception as e:
             self.logger.error("Error exportando marcadores: %s", e)
             return False
-
     def _render_html(self, folder: dict, level: int = 0) -> str:
         """Genera el HTML de una carpeta y sus contenidos (recursivo)."""
         if level == 0:
@@ -1135,16 +820,13 @@ class BookmarkManager(QWidget):
             )
         else:
             html = ""
-
         indent = "    " * level
         for sub in folder.get("children_folders", []):
             html += f"{indent}<DT><H3>{sub['name']}</H3>\n{indent}<DL><p>\n"
             html += self._render_html(sub, level + 1)
             html += f"{indent}</DL><p>\n"
-
         for bm in folder.get("children_bookmarks", []):
             html += f"{indent}<DT><A HREF=\"{bm['url']}\">{bm['title']}</A>\n"
-
         if level == 0:
             html += "</DL><p>\n</html>"
         return html

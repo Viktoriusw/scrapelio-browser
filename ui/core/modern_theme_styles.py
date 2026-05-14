@@ -621,25 +621,18 @@ class ModernStylesAdapter:
         self.current_theme_name = theme_name
         self.current_theme = ModernTheme.get_theme(theme_name)
         self.widgets: list = []
-
     def get_tab_style(self) -> str:
         return get_trapezoidal_tab_style(self.current_theme)
-
     def get_urlbar_style(self) -> str:
         return get_modern_urlbar_style(self.current_theme)
-
     def get_navbar_style(self) -> str:
         return get_modern_navbar_style(self.current_theme)
-
     def get_sidebar_style(self) -> str:
         return get_sidebar_style(self.current_theme)
-
     def get_circular_button_style(self) -> str:
         return get_nav_button_style(self.current_theme)
-
     def get_current_theme(self) -> dict:
         return self.current_theme
-
     def change_theme(self, theme_name: str) -> None:
         self.current_theme_name = theme_name
         self.current_theme = ModernTheme.get_theme(theme_name)

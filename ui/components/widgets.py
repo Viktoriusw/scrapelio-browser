@@ -35,11 +35,9 @@ class CircularButton(QPushButton):
         if icon_path:
             self.setIcon(QIcon(icon_path))
             self.setIconSize(QSize(16, 16))
-
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self.opacity_effect)
         self.opacity_effect.setOpacity(1.0)
-
     def animate_click(self):
         """Pulso de opacidad sutil al hacer click."""
         self._anim = QPropertyAnimation(self.opacity_effect, b"opacity")
@@ -70,17 +68,14 @@ class ExpandableUrlBar(QLineEdit):
 
         self.expansion_enabled = False
         self._expand_anim: QPropertyAnimation | None = None
-
     def focusInEvent(self, event):
         super().focusInEvent(event)
         # Seleccionar todo para fácil edición (comportamiento Arc/Chrome)
         QTimer.singleShot(0, self.selectAll)
         self.focused.emit()
-
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
         self.unfocused.emit()
-
     def enable_expansion(
         self,
         default_width: int = 500,
@@ -120,7 +115,6 @@ class ToastNotification(QWidget):
         self._duration = duration_ms
         self._color    = self._TYPE_COLORS.get(kind, self._TYPE_COLORS["info"])
         self._setup_ui(message)
-
     def _setup_ui(self, message: str):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 10, 14, 10)
@@ -141,7 +135,6 @@ class ToastNotification(QWidget):
         """)
         self.setMaximumWidth(280)
         self.adjustSize()
-
     # ── Animación ─────────────────────────────────────────────────────────────
 
     def _opacity_effect(self) -> QGraphicsOpacityEffect:
@@ -149,7 +142,6 @@ class ToastNotification(QWidget):
             self._op_effect = QGraphicsOpacityEffect(self)
             self.setGraphicsEffect(self._op_effect)
         return self._op_effect
-
     def show_animated(self):
         """Muestra el toast con slide-in + fade-in."""
         self.show()
@@ -165,7 +157,6 @@ class ToastNotification(QWidget):
 
         # Auto-dismiss
         QTimer.singleShot(self._duration, self._dismiss)
-
     def _dismiss(self):
         op = self._opacity_effect()
         self._fade_out = QPropertyAnimation(op, b"opacity")
@@ -175,7 +166,6 @@ class ToastNotification(QWidget):
         self._fade_out.setEasingCurve(QEasingCurve.InQuad)
         self._fade_out.finished.connect(self.close)
         self._fade_out.start()
-
     # ── Helper estático ───────────────────────────────────────────────────────
 
     @staticmethod
@@ -198,7 +188,6 @@ class ToastNotification(QWidget):
             x = parent_rect.right()  - toast.width()  - margin
             y = parent_rect.bottom() - toast.height() - margin
             toast.move(parent.mapToGlobal(QPoint(x, y)))
-
         toast.show_animated()
         return toast
 
@@ -227,38 +216,30 @@ class ToggleSwitch(QWidget):
         self._checked = checked
         self._knob_x  = 16 if checked else 2
         self._setup_animation()
-
     def _setup_animation(self):
         self._anim = QPropertyAnimation(self, b"_knob_pos")
         self._anim.setDuration(150)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
-
     def isChecked(self) -> bool:
         return self._checked
-
     def setChecked(self, value: bool):
         if value == self._checked:
             return
         self._checked = value
         self._animate_to(16 if value else 2)
         self.toggled.emit(value)
-
     def mousePressEvent(self, event):
         self.setChecked(not self._checked)
-
     def _animate_to(self, target_x: int):
         self._anim.stop()
         self._anim.setStartValue(self._knob_x)
         self._anim.setEndValue(target_x)
         self._anim.start()
-
     def _get_knob_pos(self) -> int:
         return self._knob_x
-
     def _set_knob_pos(self, x: int):
         self._knob_x = x
         self.update()
-
     _knob_pos = property(_get_knob_pos, _set_knob_pos)  # type: ignore[assignment]
 
     def paintEvent(self, event):

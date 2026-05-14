@@ -51,13 +51,11 @@ class UserScriptManager(QObject):
         # Cargar scripts de ejemplo si es primera vez
         if not self.get_all_scripts():
             self._install_example_scripts()
-
     def _get_scripts_directory(self):
         """Obtiene el directorio para almacenar scripts"""
         app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
         scripts_dir = os.path.join(app_data, "Scrapelio", "UserScripts")
         return scripts_dir
-
     def _init_database(self):
         """Inicializa la base de datos"""
         conn = sqlite3.connect(self.db_path)
@@ -93,7 +91,6 @@ class UserScriptManager(QObject):
 
         conn.commit()
         conn.close()
-
     def create_script(self, name, code, description="", author="", version="1.0",
                      match_patterns="*://*/*", run_at="document-end", grants=""):
         """Crear un nuevo script"""
@@ -109,14 +106,12 @@ class UserScriptManager(QObject):
             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
         ''', (name, description, author, version, code, match_patterns,
               run_at, grants, now, now))
-
         script_id = cursor.lastrowid
         conn.commit()
         conn.close()
 
         self.script_changed.emit()
         return script_id
-
     def update_script(self, script_id, **kwargs):
         """Actualizar un script existente"""
         conn = sqlite3.connect(self.db_path)
@@ -131,7 +126,6 @@ class UserScriptManager(QObject):
                       'enabled', 'match_patterns', 'run_at', 'grants']:
                 updates.append(f"{key} = ?")
                 params.append(value)
-
         if updates:
             updates.append("updated_at = ?")
             params.append(datetime.now().isoformat())
@@ -140,10 +134,8 @@ class UserScriptManager(QObject):
             query = f"UPDATE scripts SET {', '.join(updates)} WHERE id = ?"
             cursor.execute(query, params)
             conn.commit()
-
         conn.close()
         self.script_changed.emit()
-
     def delete_script(self, script_id):
         """Eliminar un script"""
         conn = sqlite3.connect(self.db_path)
@@ -159,7 +151,6 @@ class UserScriptManager(QObject):
         conn.close()
 
         self.script_changed.emit()
-
     def get_script(self, script_id):
         """Obtener un script por ID"""
         conn = sqlite3.connect(self.db_path)
@@ -186,7 +177,6 @@ class UserScriptManager(QObject):
                 'updated_at': row[11]
             }
         return None
-
     def get_all_scripts(self):
         """Obtener todos los scripts"""
         conn = sqlite3.connect(self.db_path)
@@ -210,10 +200,8 @@ class UserScriptManager(QObject):
                 'created_at': row[10],
                 'updated_at': row[11]
             })
-
         conn.close()
         return scripts
-
     def get_scripts_for_url(self, url):
         """Obtener scripts que coinciden con una URL"""
         matching_scripts = []
@@ -221,7 +209,6 @@ class UserScriptManager(QObject):
         for script in self.get_all_scripts():
             if not script['enabled']:
                 continue
-
             # Verificar si la URL coincide con algún patrón
             patterns = script['match_patterns'].split(',')
             for pattern in patterns:
@@ -229,9 +216,7 @@ class UserScriptManager(QObject):
                 if self._match_pattern(url, pattern):
                     matching_scripts.append(script)
                     break
-
         return matching_scripts
-
     def _match_pattern(self, url, pattern):
         """Verificar si una URL coincide con un patrón"""
         # Convertir patrón de match a regex
@@ -244,17 +229,14 @@ class UserScriptManager(QObject):
             return bool(re.match(regex_pattern, url))
         except:
             return False
-
     def toggle_script(self, script_id, enabled):
         """Activar/desactivar un script"""
         self.update_script(script_id, enabled=1 if enabled else 0)
-
     def import_script(self, file_path):
         """Importar script desde archivo"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
-
             # Parsear metadatos
             metadata = self._parse_metadata(code)
 
@@ -270,17 +252,14 @@ class UserScriptManager(QObject):
             )
 
             return script_id
-
         except Exception as e:
             print(f"[ERROR] Error importing script: {e}")
             return None
-
     def export_script(self, script_id, file_path):
         """Exportar script a archivo"""
         script = self.get_script(script_id)
         if not script:
             return False
-
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(script['code'])
@@ -288,7 +267,6 @@ class UserScriptManager(QObject):
         except Exception as e:
             print(f"[ERROR] Error exporting script: {e}")
             return False
-
     def _parse_metadata(self, code):
         """Parsear metadatos de un script (comentarios ==UserScript==)"""
         metadata = {}
@@ -302,7 +280,6 @@ class UserScriptManager(QObject):
                 continue
             elif '==/UserScript==' in line:
                 break
-
             if in_metadata and line.startswith('//'):
                 # @key value
                 match = re.match(r'//\s*@(\w+)\s+(.+)', line)
@@ -316,9 +293,7 @@ class UserScriptManager(QObject):
                         metadata[key].append(value)
                     else:
                         metadata[key] = value
-
         return metadata
-
     # GM API - Storage
     def gm_set_value(self, script_id, key, value):
         """Implementación de GM_setValue"""
@@ -332,7 +307,6 @@ class UserScriptManager(QObject):
 
         conn.commit()
         conn.close()
-
     def gm_get_value(self, script_id, key, default=None):
         """Implementación de GM_getValue"""
         conn = sqlite3.connect(self.db_path)
@@ -351,9 +325,7 @@ class UserScriptManager(QObject):
                 return json.loads(row[0])
             except:
                 return row[0]
-
         return default
-
     def _install_example_scripts(self):
         """Instalar scripts de ejemplo precargados"""
         examples = [
@@ -587,7 +559,6 @@ class UserScriptManager(QObject):
 
         for example in examples:
             self.create_script(**example)
-
         print(f"[OK] {len(examples)} example scripts installed")
 
 
@@ -613,7 +584,6 @@ class JavaScriptHighlighter(QSyntaxHighlighter):
         for keyword in keywords:
             pattern = f"\\b{keyword}\\b"
             self.highlighting_rules.append((re.compile(pattern), keyword_format))
-
         # Strings
         string_format = QTextCharFormat()
         string_format.setForeground(QColor("#CE9178"))
@@ -635,7 +605,6 @@ class JavaScriptHighlighter(QSyntaxHighlighter):
         function_format = QTextCharFormat()
         function_format.setForeground(QColor("#DCDCAA"))
         self.highlighting_rules.append((re.compile(r'\b[A-Za-z0-9_]+(?=\()'), function_format))
-
     def highlightBlock(self, text):
         """Aplicar highlighting a un bloque de texto"""
         for pattern, format in self.highlighting_rules:
@@ -660,7 +629,6 @@ class UserScriptDialog(QDialog):
 
         # Conectar señales
         self.script_manager.script_changed.connect(self.load_scripts)
-
     def setup_ui(self):
         """Configurar interfaz del diálogo"""
         layout = QVBoxLayout(self)
@@ -691,7 +659,6 @@ class UserScriptDialog(QDialog):
         close_btn = QPushButton("Cerrar")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
-
     def create_scripts_tab(self):
         """Crear tab de lista de scripts"""
         widget = QWidget()
@@ -742,7 +709,6 @@ class UserScriptDialog(QDialog):
         layout.addWidget(info_group)
 
         return widget
-
     def create_editor_tab(self):
         """Crear tab de editor"""
         widget = QWidget()
@@ -823,7 +789,6 @@ class UserScriptDialog(QDialog):
         layout.addLayout(editor_buttons)
 
         return widget
-
     def create_examples_tab(self):
         """Crear tab de ejemplos"""
         widget = QWidget()
@@ -847,7 +812,6 @@ class UserScriptDialog(QDialog):
         layout.addStretch()
 
         return widget
-
     def load_scripts(self):
         """Cargar lista de scripts"""
         self.scripts_list.clear()
@@ -858,7 +822,6 @@ class UserScriptDialog(QDialog):
             item.setData(Qt.UserRole, script['id'])
             item.setCheckState(Qt.Checked if script['enabled'] else Qt.Unchecked)
             self.scripts_list.addItem(item)
-
     def on_script_selected(self, item):
         """Cuando se selecciona un script"""
         script_id = item.data(Qt.UserRole)
@@ -875,16 +838,13 @@ class UserScriptDialog(QDialog):
 <b>Estado:</b> {'Activo' if script['enabled'] else 'Desactivado'}<br>
             """
             self.info_label.setText(info)
-
         # Toggle al hacer click en checkbox
         enabled = item.checkState() == Qt.Checked
         self.script_manager.toggle_script(script_id, enabled)
-
     def new_script(self):
         """Crear nuevo script"""
         self.current_script_id = None
         self.clear_editor()
-
     def edit_script(self):
         """Editar script seleccionado"""
         current_item = self.scripts_list.currentItem()
@@ -892,7 +852,6 @@ class UserScriptDialog(QDialog):
             QMessageBox.warning(self, "No hay script seleccionado",
                               "Por favor selecciona un script para editar.")
             return
-
         script_id = current_item.data(Qt.UserRole)
         script = self.script_manager.get_script(script_id)
 
@@ -903,13 +862,11 @@ class UserScriptDialog(QDialog):
             self.editor_match.setText(script['match_patterns'])
             self.editor_runat.setCurrentText(script['run_at'])
             self.code_editor.setPlainText(script['code'])
-
     def delete_script(self):
         """Eliminar script seleccionado"""
         current_item = self.scripts_list.currentItem()
         if not current_item:
             return
-
         script_id = current_item.data(Qt.UserRole)
         script = self.script_manager.get_script(script_id)
 
@@ -924,7 +881,6 @@ class UserScriptDialog(QDialog):
             self.script_manager.delete_script(script_id)
             QMessageBox.information(self, "Script eliminado",
                                   f"El script '{script['name']}' ha sido eliminado.")
-
     def save_script(self):
         """Guardar script desde el editor"""
         name = self.editor_name.text().strip()
@@ -934,12 +890,10 @@ class UserScriptDialog(QDialog):
             QMessageBox.warning(self, "Nombre requerido",
                               "Por favor ingresa un nombre para el script.")
             return
-
         if not code:
             QMessageBox.warning(self, "Código requerido",
                               "Por favor ingresa el código del script.")
             return
-
         if self.current_script_id:
             # Actualizar script existente
             self.script_manager.update_script(
@@ -963,9 +917,7 @@ class UserScriptDialog(QDialog):
             )
             QMessageBox.information(self, "Script creado",
                                   f"El script '{name}' ha sido creado.")
-
         self.clear_editor()
-
     def clear_editor(self):
         """Limpiar editor"""
         self.current_script_id = None
@@ -974,7 +926,6 @@ class UserScriptDialog(QDialog):
         self.editor_match.setText('*://*/*')
         self.editor_runat.setCurrentText('document-end')
         self.code_editor.clear()
-
     def import_script(self):
         """Importar script desde archivo"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -992,7 +943,6 @@ class UserScriptDialog(QDialog):
             else:
                 QMessageBox.critical(self, "Error",
                                    "No se pudo importar el script.")
-
     def export_script(self):
         """Exportar script a archivo"""
         current_item = self.scripts_list.currentItem()
@@ -1000,7 +950,6 @@ class UserScriptDialog(QDialog):
             QMessageBox.warning(self, "No hay script seleccionado",
                               "Por favor selecciona un script para exportar.")
             return
-
         script_id = current_item.data(Qt.UserRole)
         script = self.script_manager.get_script(script_id)
 

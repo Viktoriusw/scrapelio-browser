@@ -27,21 +27,20 @@ def print_header(title):
 def check_endpoint(name, url, timeout=10):
     """
     Verificar si un endpoint está accesible
-    
+
     Args:
         name: Nombre del endpoint
         url: URL a verificar
         timeout: Timeout en segundos
-        
     Returns:
         bool: True si está accesible, False si no
     """
     print(f"Verificando {name}...")
     print(f"   URL: {url}")
-    
+
     try:
         response = requests.get(url, timeout=timeout)
-        
+
         if response.status_code == 200:
             print(f"   EXITOSO - Codigo: {response.status_code}")
             return True
@@ -52,7 +51,6 @@ def check_endpoint(name, url, timeout=10):
         else:
             print(f"   RESPUESTA INESPERADA - Codigo: {response.status_code}")
             return True  # El servidor responde, aunque no sea 200
-            
     except requests.exceptions.ConnectionError:
         print(f"   ERROR DE CONEXION - No se pudo conectar al servidor")
         return False
@@ -66,20 +64,19 @@ def check_endpoint(name, url, timeout=10):
 def check_backend_health(backend_url):
     """
     Verificar el health check del backend
-    
+
     Args:
         backend_url: URL base del backend
-        
     Returns:
         bool: True si está saludable, False si no
     """
     health_url = f"{backend_url}/health"
     print(f"Verificando health check del backend...")
     print(f"   URL: {health_url}")
-    
+
     try:
         response = requests.get(health_url, timeout=10)
-        
+
         if response.status_code == 200:
             data = response.json()
             print(f"   BACKEND SALUDABLE")
@@ -88,7 +85,6 @@ def check_backend_health(backend_url):
         else:
             print(f"   Codigo: {response.status_code}")
             return False
-            
     except requests.exceptions.ConnectionError:
         print(f"   ERROR DE CONEXION")
         return False
@@ -102,7 +98,7 @@ def check_backend_health(backend_url):
 def main():
     """Verificar conexión con el backend"""
     print_header("VERIFICACION DE CONEXION CON EL BACKEND")
-    
+
     # Obtener configuración
     if USE_CONFIG_MANAGER:
         config = get_config()
@@ -114,69 +110,67 @@ def main():
         dashboard_url = f"{frontend_url}/app/dashboard.html"
     else:
         # URLs hardcodeadas (nueva IP)
-        backend_url = "http://192.168.1.175:8000"
+        backend_url = "http://74.208.93.181:8000"
         frontend_url = "http://192.168.1.174:4321"
         registration_url = f"{frontend_url}/auth/registro.html"
         login_url = f"{frontend_url}/auth/login.html"
         dashboard_url = f"{frontend_url}/app/dashboard.html"
-    
     print(f"Configuracion detectada:")
     print(f"   Backend API: {backend_url}")
     print(f"   Frontend Web: {frontend_url}")
     print()
-    
+
     # Verificar endpoints
     results = []
-    
+
     # 1. Backend API (raíz)
     results.append(("Backend API (raíz)", check_endpoint("Backend API", backend_url)))
     print()
-    
+
     # 2. Backend Health Check
     results.append(("Backend Health", check_backend_health(backend_url)))
     print()
-    
+
     # 3. Frontend Web
     results.append(("Frontend Web", check_endpoint("Frontend Web", frontend_url)))
     print()
-    
+
     # 4. Página de registro
     results.append(("Página de Registro", check_endpoint("Registro", registration_url)))
     print()
-    
+
     # 5. Página de login
     results.append(("Página de Login", check_endpoint("Login", login_url)))
     print()
-    
+
     # 6. Dashboard
     results.append(("Dashboard", check_endpoint("Dashboard", dashboard_url)))
     print()
-    
+
     # Resumen
     print_header("RESUMEN DE VERIFICACION")
-    
+
     total = len(results)
     exitosos = sum(1 for _, result in results if result)
     fallidos = total - exitosos
-    
+
     print(f"Total de verificaciones: {total}")
     print(f"Exitosas: {exitosos}")
     print(f"Fallidas: {fallidos}")
     print()
-    
+
     # Detalles
     print("Detalles:")
     for name, result in results:
         status = "OK" if result else "FAIL"
         print(f"  {status} {name}")
-    
     print()
-    
+
     # Conclusión
     if exitosos == total:
         print("PERFECTO! Todos los servicios estan accesibles")
         print()
-        print("El navegador puede conectarse al backend en la nueva IP: 192.168.1.175")
+        print("El navegador puede conectarse al backend en la nueva IP: 74.208.93.181")
         print()
         return 0
     elif exitosos >= total // 2:
@@ -197,10 +191,10 @@ def main():
         print(f"   Solo {exitosos}/{total} servicios funcionando")
         print()
         print("💡 Sugerencias:")
-        print("   1. Verifica que el servidor backend esté ejecutándose en 192.168.1.175:8000")
+        print("   1. Verifica que el servidor backend esté ejecutándose en 74.208.93.181:8000")
         print("   2. Verifica que el servidor web esté ejecutándose en 192.168.1.174:4321")
         print("   3. Verifica la conectividad de red:")
-        print(f"      ping 192.168.1.175")
+        print(f"      ping 74.208.93.181")
         print("   4. Verifica que los puertos 8000 y 4321 estén abiertos")
         print()
         return 2
@@ -217,4 +211,3 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
