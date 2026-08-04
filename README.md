@@ -29,16 +29,22 @@ sudo apt install -y python3 python3-venv python3-pip \
 source venv/bin/activate
 pip install --upgrade pip</code></pre>
 
-<h4>3. Dependencias Python</h4>
+<h4>3. Instalar PySide6 (paso obligatorio)</h4>
+
+<p>Es la dependencia crítica del proyecto: sin ella el navegador no arranca. Instálala <strong>antes</strong> que el resto de <code>requirements.txt</code>, porque si esa instalación se interrumpe a medias (por ejemplo en un paquete pesado como <code>chromadb</code>), el entorno puede quedar sin PySide6.</p>
+
+<pre><code>pip install --upgrade "PySide6>=6.5.0"
+python3 -c "from PySide6.QtWebEngineWidgets import QWebEngineView; print('✅ PySide6 OK')"</code></pre>
+
+<h4>4. Resto de dependencias</h4>
 
 <pre><code>pip install -r requirements.txt</code></pre>
 
-<h4>4. Verificar instalación</h4>
+<h4>5. Verificar instalación</h4>
 
-<pre><code>python3 check_dependencies.py
-python3 -c "from PySide6.QtWebEngineWidgets import QWebEngineView; print('✅ OK')"</code></pre>
+<pre><code>python3 check_dependencies.py</code></pre>
 
-<h4>5. Ejecutar el navegador</h4>
+<h4>6. Ejecutar el navegador</h4>
 
 <pre><code>python3 main.py</code></pre>
 
