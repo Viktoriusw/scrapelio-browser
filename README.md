@@ -48,6 +48,40 @@ python3 -c "from PySide6.QtWebEngineWidgets import QWebEngineView; print('✅ Py
 
 <pre><code>python3 main.py</code></pre>
 
+<h3>🪟 Windows</h3>
+
+<pre><code>cd \ruta\a\scrapelio-browser</code></pre>
+
+<h4>1. Requisitos previos</h4>
+
+<p>Python 3.10–3.12 instalado desde <a href="https://www.python.org/downloads/windows/">python.org</a>, marcando la opción <strong>"Add python.exe to PATH"</strong> durante la instalación.</p>
+
+<h4>2. Entorno virtual</h4>
+
+<pre><code>python -m venv venv_win
+venv_win\Scripts\activate.bat
+python -m pip install --upgrade pip setuptools wheel</code></pre>
+
+<h4>3. Instalar PySide6 (paso obligatorio)</h4>
+
+<p>Es la dependencia crítica del proyecto: sin ella el navegador no arranca. Instálala <strong>antes</strong> que el resto de <code>requirements.txt</code>, porque si esa instalación se interrumpe a medias (por ejemplo en un paquete pesado como <code>chromadb</code>), el entorno puede quedar sin PySide6.</p>
+
+<pre><code>pip install --upgrade "PySide6>=6.5.0"
+python -c "from PySide6.QtWebEngineWidgets import QWebEngineView; print('✅ PySide6 OK')"</code></pre>
+
+<h4>4. Resto de dependencias</h4>
+
+<pre><code>pip install -r requirements.txt</code></pre>
+
+<h4>5. Verificar instalación</h4>
+
+<pre><code>python check_dependencies.py</code></pre>
+
+<h4>6. Ejecutar el navegador</h4>
+
+<pre><code>venv_win\Scripts\activate.bat
+python main.py</code></pre>
+
 <hr>
 
 <h2> Características principales</h2>
