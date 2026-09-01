@@ -1,0 +1,119 @@
+╔══════════════════════════════════════════════════════════════════╗
+║         SCRAPELIO BROWSER - GENERAR EJECUTABLE WINDOWS          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+📋 ARCHIVOS IMPORTANTES CREADOS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ build_windows.bat          - Script automático para Windows
+✅ build_windows.sh           - Script para Linux
+✅ scrapelio-browser.spec     - Configuración de PyInstaller
+✅ COMO_GENERAR_EXE.md        - Guía rápida (¡LEE ESTO PRIMERO!)
+✅ BUILD_INSTRUCTIONS.md      - Instrucciones detalladas
+✅ LEEME_PRIMERO.txt          - Este archivo
+
+
+🚀 INICIO RÁPIDO EN WINDOWS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Asegúrate de tener Python 3.8+ instalado
+   → Descarga: https://www.python.org/downloads/
+
+2. Haz doble clic en: build_windows.bat
+
+3. Espera 5-10 minutos
+
+4. Tu ejecutable estará en:
+   dist\scrapelio-browser\scrapelio-browser.exe
+
+
+📦 LO QUE OBTIENES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Ejecutable Windows standalone (.exe)
+✓ TODAS las dependencias incluidas
+✓ Todos los recursos (iconos, plugins, UI)
+✓ NO requiere instalación de Python para el usuario final
+✓ Listo para distribuir
+
+
+📝 CARACTERÍSTICAS DEL EJECUTABLE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+• Incluye: PySide6, PyQt6, Selenium, Playwright
+• Incluye: Todas las bibliotecas de requirements.txt
+• Incluye: Directorios icons/, plugins/, ui/
+• Incluye: Archivos .json, .yaml, .db, .txt
+• Tamaño: ~300-500 MB (debido a Qt WebEngine)
+• Sin consola: Ventana limpia al ejecutar
+• Portable: Funciona desde cualquier ubicación
+
+
+⚠️  IMPORTANTE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. DEBES distribuir la carpeta COMPLETA dist/scrapelio-browser/
+   ❌ NO solo el archivo .exe
+   ✅ Toda la carpeta incluyendo subcarpetas
+
+2. Primera ejecución puede ser lenta (normal)
+
+3. Algunos antivirus reportan falso positivo
+   → Es normal con PyInstaller
+   → Agrega excepción si es necesario
+
+
+🔧 SI TIENES PROBLEMAS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Lee COMO_GENERAR_EXE.md
+2. Lee BUILD_INSTRUCTIONS.md (guía completa)
+3. Verifica que Python está en el PATH
+4. Ejecuta: python --version (debe mostrar 3.8+)
+
+
+💡 DISTRIBUCIÓN:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Para compartir con usuarios:
+
+1. Comprime dist/scrapelio-browser/ en un ZIP
+2. El usuario extrae el ZIP
+3. El usuario ejecuta scrapelio-browser.exe
+4. ¡Listo! No necesita instalar nada
+
+
+📋 LISTA DE VERIFICACIÓN:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Antes de ejecutar build_windows.bat:
+
+□ Python 3.8+ instalado
+□ Python agregado al PATH
+□ Conexión a internet (para descargar dependencias)
+□ ~2 GB de espacio libre en disco
+
+Después del build:
+
+□ Carpeta dist/scrapelio-browser/ existe
+□ scrapelio-browser.exe está presente
+□ Subcarpetas icons/, plugins/, ui/ presentes
+□ Archivos .json, .yaml presentes
+
+
+🎯 VERSIONES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+• PyInstaller: 6.17.0
+• Python recomendado: 3.11+
+• Windows objetivo: 10/11 (64-bit)
+• Fecha: Enero 2026
+
+
+═══════════════════════════════════════════════════════════════════
+
+Para más información, consulta los archivos:
+→ COMO_GENERAR_EXE.md (guía rápida)
+→ BUILD_INSTRUCTIONS.md (guía completa)
+
+═══════════════════════════════════════════════════════════════════

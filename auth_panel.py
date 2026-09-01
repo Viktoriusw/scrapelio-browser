@@ -48,6 +48,45 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _get_login_theme_colors() -> dict:
+    """Obtiene colores del ThemeEngine activo para el diálogo de login."""
+    try:
+        from ui.core.theme_engine import get_theme_engine
+        engine = get_theme_engine()
+        if engine:
+            c = engine.get_theme_data().get("colors", {})
+            is_dark = engine.get_current_theme().lower() != "light"
+            return {
+                "bg": c.get("background", "#2B2D30" if is_dark else "#f5f5f5"),
+                "surface": c.get("surface", "#3C3F41" if is_dark else "#ffffff"),
+                "text": c.get("primary", "#E8EAED" if is_dark else "#111111"),
+                "text_secondary": c.get("secondary", "#9AA0A6" if is_dark else "#555555"),
+                "input_bg": c.get("input_background", "#3C3F41" if is_dark else "#ffffff"),
+                "input_border": c.get("input_border", "#5F6368" if is_dark else "#d0d0d0"),
+                "input_focus": c.get("input_focus", "#8AB4F8" if is_dark else "#0078d4"),
+                "accent": c.get("accent", "#8AB4F8" if is_dark else "#0078d4"),
+                "login_btn": c.get("login_button", "#8AB4F8" if is_dark else "#3498db"),
+                "login_btn_hover": c.get("login_button_hover", "#1A73E8" if is_dark else "#2980b9"),
+                "login_btn_pressed": c.get("login_button_pressed", "#174EA6" if is_dark else "#21618c"),
+                "border": c.get("border", "#4E5254" if is_dark else "#e0e0e0"),
+                "error_bg": c.get("surface", "#3C3F41" if is_dark else "#fff0f0"),
+                "error_text": c.get("error", "#F28B82" if is_dark else "#c0392b"),
+                "error_border": c.get("error", "#F28B82" if is_dark else "#e74c3c"),
+                "is_dark": is_dark,
+            }
+    except Exception:
+        pass
+    return {
+        "bg": "#f5f5f5", "surface": "#ffffff", "text": "#111111",
+        "text_secondary": "#555555", "input_bg": "#ffffff",
+        "input_border": "#d0d0d0", "input_focus": "#0078d4",
+        "accent": "#0078d4", "login_btn": "#3498db",
+        "login_btn_hover": "#2980b9", "login_btn_pressed": "#21618c",
+        "border": "#e0e0e0", "error_bg": "#fff0f0",
+        "error_text": "#c0392b", "error_border": "#e74c3c", "is_dark": False,
+    }
+
+
 class LoginDialog(QDialog):
     """Diálogo de login con validación robusta"""
 
@@ -73,6 +112,9 @@ class LoginDialog(QDialog):
         self.validation_attempts = 0
 
         self.max_attempts = 3
+
+        # Cargar colores del tema activo antes de construir la UI
+        self._tc = _get_login_theme_colors()
 
         self.setup_ui()
 
@@ -106,13 +148,13 @@ class LoginDialog(QDialog):
 
         self._update_login_button_state()
     def _validate_email(self):
-        """Validar formato de email"""
+        """Validar identificador de acceso (ID de usuario Scrapelio o email legacy)"""
 
-        email = self.email_edit.text().strip()
+        identifier = self.email_edit.text().strip()
 
-        if email:
-            if "@" not in email or "." not in email.split("@")[-1]:
-                self._show_field_error(self.email_edit, "Formato de email inválido")
+        if identifier:
+            if " " in identifier or len(identifier) < 3:
+                self._show_field_error(self.email_edit, "Introduce tu ID de usuario o email")
 
                 return False
             else:
@@ -135,46 +177,32 @@ class LoginDialog(QDialog):
             self.login_button.setText("Iniciar Sesión")
     def _show_field_error(self, field, message):
         """Mostrar error en un campo"""
-
-        field.setStyleSheet("""
-
-            QLineEdit {
-
+        tc = self._tc
+        field.setStyleSheet(f"""
+            QLineEdit {{
                 padding: 12px;
-
-                border: 2px solid #e74c3c;
-
+                border: 2px solid {tc['error_border']};
                 border-radius: 8px;
-
                 font-size: 14px;
-
-                background-color: #fdf2f2;
-            }
+                background-color: {tc['error_bg']};
+                color: {tc['text']};
+            }}
         """)
-
-        # TODO: Mostrar tooltip con el error
     def _clear_field_error(self, field):
         """Limpiar error de un campo"""
-
-        field.setStyleSheet("""
-
-            QLineEdit {
-
+        tc = self._tc
+        field.setStyleSheet(f"""
+            QLineEdit {{
                 padding: 12px;
-
-                border: 2px solid #ecf0f1;
-
+                border: 2px solid {tc['input_border']};
                 border-radius: 8px;
-
                 font-size: 14px;
-
-                background-color: white;
-            }
-
-            QLineEdit:focus {
-
-                border-color: #3498db;
-            }
+                background-color: {tc['input_bg']};
+                color: {tc['text']};
+            }}
+            QLineEdit:focus {{
+                border-color: {tc['input_focus']};
+            }}
         """)
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -209,7 +237,7 @@ class LoginDialog(QDialog):
 
         title_label.setFont(QFont("Arial", 24, QFont.Bold))
 
-        title_label.setStyleSheet("color: #2c3e50; margin-bottom: 5px;")
+        title_label.setStyleSheet(f"color: {self._tc['text']}; margin-bottom: 5px;")
         header_layout.addWidget(title_label)
 
         # Subtitle
@@ -218,7 +246,7 @@ class LoginDialog(QDialog):
 
         subtitle_label.setAlignment(Qt.AlignCenter)
 
-        subtitle_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        subtitle_label.setStyleSheet(f"color: {self._tc['text_secondary']}; font-size: 14px;")
         header_layout.addWidget(subtitle_label)
 
         layout.addLayout(header_layout)
@@ -231,13 +259,13 @@ class LoginDialog(QDialog):
 
         self.error_label.setWordWrap(True)
 
-        self.error_label.setStyleSheet("""
+        self.error_label.setStyleSheet(f"""
 
-            QLabel {
+            QLabel {{
 
-                background-color: #fee;
-                color: #c33;
-                border: 1px solid #fcc;
+                background-color: {self._tc['error_bg']};
+                color: {self._tc['error_text']};
+                border: 1px solid {self._tc['error_border']};
 
                 border-radius: 6px;
 
@@ -246,7 +274,7 @@ class LoginDialog(QDialog):
                 font-size: 13px;
 
                 margin: 5px 0;
-            }
+            }}
         """)
 
         self.error_label.hide()
@@ -263,30 +291,9 @@ class LoginDialog(QDialog):
 
         self.email_edit = QLineEdit()
 
-        self.email_edit.setPlaceholderText("tu@email.com")
+        self.email_edit.setPlaceholderText("sc_xxxxxxxx")
 
-        self.email_edit.setStyleSheet("""
-
-            QLineEdit {
-
-                padding: 12px;
-
-                border: 2px solid #ecf0f1;
-
-                border-radius: 8px;
-
-                font-size: 14px;
-
-                background-color: white;
-            }
-
-            QLineEdit:focus {
-
-                border-color: #3498db;
-            }
-        """)
-
-        form_layout.addRow("Email:", self.email_edit)
+        form_layout.addRow("ID user Scrapelio:", self.email_edit)
 
         # Password field
 
@@ -295,27 +302,6 @@ class LoginDialog(QDialog):
         self.password_edit.setEchoMode(QLineEdit.Password)
 
         self.password_edit.setPlaceholderText("Tu contraseña")
-
-        self.password_edit.setStyleSheet("""
-
-            QLineEdit {
-
-                padding: 12px;
-
-                border: 2px solid #ecf0f1;
-
-                border-radius: 8px;
-
-                font-size: 14px;
-
-                background-color: white;
-            }
-
-            QLineEdit:focus {
-
-                border-color: #3498db;
-            }
-        """)
 
         form_layout.addRow("Contraseña:", self.password_edit)
 
@@ -426,81 +412,67 @@ class LoginDialog(QDialog):
 
         self.password_edit.returnPressed.connect(self.on_login_clicked)
     def setup_styles(self):
-        """Setup dialog styles"""
+        """Setup dialog styles according to the active theme"""
+        tc = self._tc
+        bg = tc["bg"]
+        surface = tc["surface"]
+        text = tc["text"]
+        text_secondary = tc["text_secondary"]
+        input_bg = tc["input_bg"]
+        input_border = tc["input_border"]
+        input_focus = tc["input_focus"]
+        login_btn = tc["login_btn"]
+        login_btn_hover = tc["login_btn_hover"]
+        login_btn_pressed = tc["login_btn_pressed"]
+        border = tc["border"]
 
-        self.setStyleSheet("""
-
-            QDialog {
-
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-
-                    stop:0 #ffffff, stop:1 #f8f9fa);
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg};
                 border-radius: 12px;
-            }
-
-            QLabel {
-
-                color: #2c3e50;
-            }
-
-            QLineEdit {
-
+            }}
+            QLabel {{
+                color: {text};
+            }}
+            QCheckBox {{
+                color: {text};
+            }}
+            QLineEdit {{
                 padding: 12px 16px;
-
-                border: 2px solid #e1e8ed;
-
+                border: 2px solid {input_border};
                 border-radius: 8px;
-
                 font-size: 14px;
-
-                background-color: white;
-
-                selection-background-color: #3498db;
-            }
-
-            QLineEdit:focus {
-
-                border-color: #3498db;
-                background-color: #f8f9ff;
-            }
-
-            QPushButton {
-
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-
-                    stop:0 #3498db, stop:1 #2980b9);
+                background-color: {input_bg};
+                color: {text};
+                selection-background-color: {input_focus};
+            }}
+            QLineEdit:focus {{
+                border-color: {input_focus};
+                background-color: {surface};
+            }}
+            QLineEdit:disabled {{
+                background-color: {border};
+                color: {text_secondary};
+            }}
+            QPushButton {{
+                background-color: {login_btn};
                 color: white;
-
                 border: none;
-
                 padding: 12px 24px;
-
                 border-radius: 8px;
-
                 font-size: 14px;
-
                 font-weight: bold;
-            }
-
-            QPushButton:hover {
-
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-
-                    stop:0 #5dade2, stop:1 #3498db);
-            }
-
-            QPushButton:pressed {
-
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-
-                    stop:0 #2980b9, stop:1 #1f618d);
-            }
-
-            QPushButton:disabled {
-
-                background: #bdc3c7;
-                color: #7f8c8d;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {login_btn_hover};
+            }}
+            QPushButton:pressed {{
+                background-color: {login_btn_pressed};
+            }}
+            QPushButton:disabled {{
+                background-color: {border};
+                color: {text_secondary};
+            }}
         """)
     def on_login_clicked(self):
         """Manejador de click en botón de login con validación robusta"""
@@ -520,7 +492,7 @@ class LoginDialog(QDialog):
 
             return
         if not self._validate_email():
-            self._show_error("Por favor, introduce un email válido.")
+            self._show_error("Por favor, introduce tu ID de usuario o email.")
 
             return
         if len(password) < 6:
@@ -559,7 +531,7 @@ class LoginDialog(QDialog):
     def on_forgot_password(self):
         """Handle forgot password link"""
 
-        webbrowser.open("http://192.168.1.174:4321/auth/recuperar")
+        webbrowser.open("https://scrapelio.com/auth/recuperar")
     def _show_error(self, message):
         """Mostrar error al usuario en el propio diálogo"""
 
@@ -874,7 +846,7 @@ class AccountInfoWidget(QWidget):
     def on_manage_account(self):
         """Handle manage account button"""
 
-        webbrowser.open("http://192.168.1.174:4321/app/dashboard")
+        webbrowser.open("https://scrapelio.com/app/dashboard")
 
         self.manage_account_requested.emit()
     def on_logout(self):

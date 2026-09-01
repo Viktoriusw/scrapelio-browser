@@ -153,7 +153,7 @@ class ConfigManager:
         """
         return {
             'backend': {
-                'primary_url': 'http://74.208.93.181:8000',
+                'primary_url': 'https://api.scrapelio.com',
                 'fallback_urls': ['http://localhost:8000', 'http://127.0.0.1:8000'],
                 'timeouts': {'auth': 15, 'api': 10, 'plugin_download': 60, 'quick_check': 5},
                 'max_retries': 3,
@@ -161,10 +161,10 @@ class ConfigManager:
                 'license_validation': {'interval': 300, 'cache_duration': 300}
             },
             'frontend': {
-                'url': 'http://192.168.1.174:4321',
-                'registration_url': 'http://192.168.1.174:4321/auth/registro.html',
-                'login_url': 'http://192.168.1.174:4321/auth/login.html',
-                'dashboard_url': 'http://192.168.1.174:4321/app/dashboard.html'
+                'url': 'https://scrapelio.com',
+                'registration_url': 'https://scrapelio.com/auth/registro.html',
+                'login_url': 'https://scrapelio.com/auth/login.html',
+                'dashboard_url': 'https://scrapelio.com/app/dashboard.html'
             },
             'smtp': {
                 'host': 'localhost',

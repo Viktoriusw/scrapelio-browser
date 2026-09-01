@@ -34,13 +34,13 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
 
     # User-Agents predefinidos
     USER_AGENTS = {
-        'Chrome': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Firefox': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-        'Brave': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Brave/120',
-        'Safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-        'Edge': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-        'Android': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
-        'iOS': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+        'Chrome': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+        'Firefox': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+        'Brave': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Brave/136',
+        'Safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15',
+        'Edge': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
+        'Android': 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.6478.122 Mobile Safari/537.36',
+        'iOS': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1',
         'Custom': ''
     }
 
@@ -261,24 +261,61 @@ class NetworkInterceptor(QWebEngineUrlRequestInterceptor):
     def _is_media_url(self, url: str) -> bool:
         """Indica si la URL parece ser de contenido multimedia (vídeo/audio)."""
         url_lower = url.lower()
-        media_ext = ('.mp4', '.m3u8', '.ts', '.webm', '.mpd', '.m4s', '.m4a')
-        media_hints = ('phncdn', 'googlevideo', '/video/', '/media/', '/stream/', 'cloudfront')
+        media_ext = ('.mp4', '.m3u8', '.ts', '.webm', '.mpd', '.m4s', '.m4a', '.mp3', '.ogg', '.flv')
+        media_hints = (
+            'phncdn', 'googlevideo', '/video/', '/media/', '/stream/', 'cloudfront',
+            'akamaized', 'akamai', 'fastly.net', 'vimeocdn', 'vod.vimeo',
+            'jtvnw.net', 'twitchsvc', 'twitchusercontent',
+            'tiktokcdn', 'muscdn.com', 'tiktok.com/video',
+            'video.twimg', 'twimg.com/ext_tw',
+            'nflxvideo', 'nflximg',
+            'brightcove.net', 'jwpltx', 'jwplatform',
+            'fbcdn.net', 'cdninstagram', 'fbsbx.com',
+            'dailymotionakam', 'dmcdn.net',
+            'b-cdn.net', 'bunnycdn',
+            'amazonaws.com/video', 'amazonaws.com/media',
+        )
         return any(ext in url_lower for ext in media_ext) or any(h in url_lower for h in media_hints)
     def _should_block_url(self, url):
         """Verificar si una URL debe ser bloqueada"""
 
         # ✅ WHITELIST: Dominios críticos que NUNCA deben bloquearse
-        # Estos dominios son esenciales para funcionalidad básica de sitios
         WHITELIST_DOMAINS = [
             'google.com',
-            'gstatic.com',      # CDN de Google (esencial para CAPTCHA)
-            'googleapis.com',   # APIs de Google
-            'recaptcha.net',    # CAPTCHA de Google
-            'googleusercontent.com',  # Contenido de Google
-            'phncdn.com',       # CDN de vídeo (evitar bloquear reproducción)
-            'challenges.cloudflare.com',  # Cloudflare Turnstile CAPTCHA
-            'cloudflare.com',             # Cloudflare CDN/servicios
-            'cloudflareinsights.com',     # Telemetría requerida por Turnstile
+            'gstatic.com',
+            'googleapis.com',
+            'recaptcha.net',
+            'googleusercontent.com',
+            'phncdn.com',
+            'challenges.cloudflare.com',
+            'cloudflare.com',
+            'cloudflareinsights.com',
+            # CDNs de vídeo — necesarios para reproducción en sitios distintos de YouTube
+            'googlevideo.com',
+            'akamaized.net',
+            'akamaihd.net',
+            'akamaistream.net',
+            'fastly.net',
+            'vimeocdn.com',
+            'vimeo.com',
+            'jtvnw.net',
+            'twitchsvc.net',
+            'twitchusercontent.com',
+            'tiktokcdn.com',
+            'muscdn.com',
+            'video.twimg.com',
+            'nflxvideo.net',
+            'nflximg.net',
+            'brightcove.net',
+            'jwplatform.com',
+            'jwpsrv.com',
+            'fbcdn.net',
+            'cdninstagram.com',
+            'fbsbx.com',
+            'dailymotionakam.com',
+            'dmcdn.net',
+            'b-cdn.net',
+            'bunnycdn.com',
         ]
 
         # Verificar si la URL pertenece a un dominio en whitelist

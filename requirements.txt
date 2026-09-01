@@ -1,4 +1,9 @@
-# Dependencias principales del navegador
+# ══════════════════════════════════════════════════════════════════════════════
+# OBLIGATORIO — instalar PRIMERO y por separado si pip -r falla a medias:
+#   pip install --upgrade "PySide6>=6.5.0"
+# Verificar: python3 -c "from PySide6.QtWebEngineWidgets import QWebEngineView"
+# Scrapelio Browser usa PySide6 exclusivamente (PyQt5/PyQt6 NO son compatibles).
+# ══════════════════════════════════════════════════════════════════════════════
 PySide6>=6.5.0
 
 # Para el panel de chat con IA

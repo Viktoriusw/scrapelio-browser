@@ -16,26 +16,23 @@ from functools import wraps
 from typing import Callable, Any, Optional, List
 
 
-from PySide6.QtWidgets import QWidget, QMessageBox
+import logging
+
+
+from PySide6.QtWidgets import QWidget, QMessageBox, QVBoxLayout
 
 
 from PySide6.QtCore import QObject, Signal
 
 
-# Define PluginAccessLevel enum locally
+# PluginAccessLevel se define en unified_plugin_manager.py — importado aquí para
+# evitar dos clases Enum independientes que nunca eran iguales entre sí (bug histórico).
 
 
-from enum import Enum
+from unified_plugin_manager import PluginAccessLevel
 
 
-class PluginAccessLevel(Enum):
-    FREE = "free"
-
-    PREMIUM = "premium"
-
-    TRIAL = "trial"
-
-    EXPIRED = "expired"
+logger = logging.getLogger(__name__)
 
 
 def requires_premium(plugin_id: str, feature: str = None, show_dialog: bool = True):
@@ -72,7 +69,10 @@ def requires_premium(plugin_id: str, feature: str = None, show_dialog: bool = Tr
 
                 parent_widget = args[0].parent()
             if not validator:
-                print(f"[PREMIUM] Warning: No plugin validator found for {plugin_id}")
+                logger.debug(
+                    "Sin plugin_validator para %s — bypass (dev o sin gestor)",
+                    plugin_id,
+                )
 
                 return func(*args, **kwargs)
             # Check access
@@ -130,7 +130,10 @@ def premium_feature(plugin_id: str, feature: str, fallback_func: Callable = None
 
                 parent_widget = args[0].parent()
             if not validator:
-                print(f"[PREMIUM] Warning: No plugin validator found for {plugin_id}")
+                logger.debug(
+                    "Sin plugin_validator para %s — bypass (dev o sin gestor)",
+                    plugin_id,
+                )
 
                 if fallback_func:
                     return fallback_func(*args, **kwargs)
@@ -185,7 +188,10 @@ def trial_feature(plugin_id: str, feature: str, max_uses: int = 10):
 
                 parent_widget = args[0].parent()
             if not validator:
-                print(f"[PREMIUM] Warning: No plugin validator found for {plugin_id}")
+                logger.debug(
+                    "Sin plugin_validator para %s — bypass (dev o sin gestor)",
+                    plugin_id,
+                )
 
                 return func(*args, **kwargs)
             # Check if user has premium access

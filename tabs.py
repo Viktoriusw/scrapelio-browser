@@ -2,11 +2,11 @@ import json
 
 import os
 
-from PySide6.QtWidgets import QTabWidget, QTabBar, QMenu, QPushButton
+from PySide6.QtWidgets import QTabWidget, QTabBar, QMenu, QPushButton, QStackedWidget, QToolButton, QWidget, QHBoxLayout
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from PySide6.QtCore import QUrl, Qt, QSettings, Signal
+from PySide6.QtCore import QUrl, Qt, QSettings, Signal, QEvent
 
 from PySide6.QtGui import QIcon
 
@@ -114,6 +114,134 @@ class BrowserTabBar(QTabBar):
     def refresh_icon(self, color: str):
         self._btn.refresh_icon(color)
 
+    def tabInserted(self, index: int) -> None:
+        super().tabInserted(index)
+        self._reposition()
+        self._install_close_button(index)
+
+    def _install_close_button(self, index: int) -> None:
+        """Instala un QToolButton ✕ como botón de cierre de pestaña.
+
+        Usa setTabButton() directamente en lugar de QSS image: url() para
+        evitar el problema de rutas con espacios que Qt QSS no puede cargar.
+        El índice se resuelve dinámicamente al hacer clic para soportar
+        pestañas que se eliminan y desplazan los índices restantes.
+        """
+        # Contenedor transparente: da 6px de margen derecho sin ampliar el hover
+        container = QWidget(self)
+        container.setStyleSheet("background: transparent;")
+
+        btn = QToolButton(container)
+        btn.setText("✕")
+        btn.setFixedSize(18, 18)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolTip("Cerrar pestaña")
+        btn.setStyleSheet("""
+            QToolButton {
+                color: #A0A0A0;
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+                font-size: 13px;
+                font-weight: 400;
+                padding: 0px;
+            }
+            QToolButton:hover {
+                color: #E8EAED;
+                background: rgba(255, 255, 255, 0.20);
+            }
+            QToolButton:pressed {
+                background: rgba(255, 255, 255, 0.30);
+            }
+        """)
+
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 6, 0)  # 6px de margen derecho
+        layout.setSpacing(0)
+        layout.addWidget(btn)
+        container.setFixedSize(24, 18)
+
+        def _on_close(_checked=False, btn=btn):
+            c = btn.parent()
+            bar = c.parent() if c else None
+            if bar is None:
+                return
+            for i in range(bar.count()):
+                if bar.tabButton(i, QTabBar.RightSide) is c:
+                    bar.tabCloseRequested.emit(i)
+                    return
+
+        btn.clicked.connect(_on_close)
+        self.setTabButton(index, QTabBar.RightSide, container)
+
+
+class DetachedTabWidget(QTabWidget):
+    """
+    QTabWidget cuya barra de pestañas puede vivir FUERA del propio widget,
+    reparentada a otra fila del layout (distribución estilo Firefox: la tira
+    de pestañas arriba del todo y, debajo, la barra de navegación).
+
+    Cuando la barra se reparenta, QTabWidget sigue reservando en su parte
+    superior el espacio donde antes estaba la barra, dejando un hueco. Esta
+    subclase fuerza al QStackedWidget interno (el que contiene las páginas)
+    a ocupar toda el área disponible, eliminando ese hueco. Toda la API
+    pública de QTabWidget se conserva intacta.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._inner_stack = None
+        self._bar_detached = False
+
+    def set_bar_detached(self, detached: bool) -> None:
+        """Activa el modo barra-externa (la barra vive en otro layout)."""
+        self._bar_detached = bool(detached)
+        self._fit_stack()
+
+    def _stack(self):
+        if self._inner_stack is None:
+            self._inner_stack = self.findChild(QStackedWidget)
+        return self._inner_stack
+
+    def _fit_stack(self):
+        if not self._bar_detached:
+            return
+        st = self._stack()
+        if st is not None:
+            st.setGeometry(self.rect())
+
+    def _reassert_bar_layout(self):
+        """
+        QTabWidget vuelve a posicionar su barra (aunque esté reparentada) con
+        el ancho del propio QTabWidget en cada pase de layout, pisando al layout
+        del contenedor superior. Reactivamos el layout del contenedor padre para
+        que recupere la autoridad sobre la geometría de la barra.
+        """
+        if not self._bar_detached:
+            return
+        bar = self.tabBar()
+        parent = bar.parentWidget() if bar is not None else None
+        if parent is not None and parent is not self:
+            lay = parent.layout()
+            if lay is not None:
+                lay.activate()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_stack()
+        self._reassert_bar_layout()
+
+    def event(self, event):
+        result = super().event(event)
+        if self._bar_detached and event.type() in (
+            QEvent.Type.LayoutRequest,
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+        ):
+            self._fit_stack()
+            self._reassert_bar_layout()
+        return result
+
 
 class TabManager:
     SESSION_FILE = "tab_session.json"
@@ -123,7 +251,7 @@ class TabManager:
 
         self.parent = parent
 
-        self.tabs = QTabWidget()
+        self.tabs = DetachedTabWidget()
         self.tabs.setObjectName("browserTabs")
 
         # BrowserTabBar: barra de pestañas con botón '+' integrado
@@ -287,6 +415,11 @@ class TabManager:
                     print(f"[UA-INTERCEPTOR] HTTP headers interceptor configured")
                 except Exception as e:
                     print(f"[WARNING] Could not configure User-Agent: {e}")
+            if hasattr(self.parent, 'privacy_manager') and self.parent.privacy_manager:
+                try:
+                    self.parent.privacy_manager.apply_privacy_settings(browser)
+                except Exception as priv_ex:
+                    print(f"[WARNING] apply_privacy_settings on new tab: {priv_ex}")
             # Configurar gestor de contraseñas ANTES de cargar la URL
             # para que los scripts estén registrados en la primera carga
             if hasattr(self.parent, 'password_manager'):
@@ -310,8 +443,17 @@ class TabManager:
             browser.titleChanged.connect(title_changed)
             self._signal_connections[browser_id]['titleChanged'] = title_changed
 
-            # Conectar iconChanged
-            icon_changed = lambda icon: self.update_tab_icon(icon, browser)
+            # Conectar iconChanged — actualiza la pestaña Y alimenta el FaviconManager
+            def _make_icon_handler(b):
+                def _handler(icon):
+                    self.update_tab_icon(icon, b)
+                    try:
+                        from favicon_manager import get_favicon_manager
+                        get_favicon_manager().store(b.url().toString(), icon)
+                    except Exception:
+                        pass
+                return _handler
+            icon_changed = _make_icon_handler(browser)
             browser.iconChanged.connect(icon_changed)
             self._signal_connections[browser_id]['iconChanged'] = icon_changed
 
@@ -367,28 +509,45 @@ class TabManager:
                 self.tabs.setTabIcon(index, icon)
         except Exception as e:
             print(f"Error al actualizar el icono de la pestaña: {str(e)}")
+    def _site_name_for_tab(self, browser, fallback_title=""):
+        """
+        Devuelve el nombre del sitio (host sin 'www.') para mostrar en la
+        pestaña, estilo Firefox simplificado. Para páginas sin host (about:,
+        nueva pestaña, archivos locales…) usa el título de la página.
+        """
+        try:
+            host = browser.url().host()
+        except Exception:
+            host = ""
+        if host:
+            if host.startswith("www."):
+                host = host[4:]
+            return host
+        label = (fallback_title or "").strip()
+        return label or "Nueva pestaña"
+
     def update_tab_title(self, title, browser):
         try:
             index = self.tabs.indexOf(browser)
 
             if index != -1:
-                if not title:
-                    url = browser.url().toString()
-
-                    title = url.split('/')[-1] if url else "New Tab"
-                if len(title) > 30:
-                    title = title[:27] + "..."
+                # El texto de la pestaña es el nombre del sitio (host), no el
+                # título completo de la página.
+                label = self._site_name_for_tab(browser, title)
+                if len(label) > 30:
+                    label = label[:27] + "..."
                 # Agregar indicador visual si la pestaña pertenece a un grupo
                 group = self.group_manager.get_tab_group(index)
                 if group:
                     # Usar emoji de círculo coloreado como indicador visual
-                    title = f"● {title}"
+                    label = f"● {label}"
                     # Aplicar color del grupo al tab bar
                     self._apply_group_color_to_tab(index, group.color)
-                self.tabs.setTabText(index, title)
-
+                self.tabs.setTabText(index, label)
+                # El título de la ventana sí conserva el título completo.
                 if self.tabs.currentWidget() == browser:
-                    self.parent.setWindowTitle(f"{title} - Scrapelio")
+                    win_title = (title or label).strip() or label
+                    self.parent.setWindowTitle(f"{win_title} - Scrapelio")
         except Exception as e:
             print(f"Error al actualizar el título de la pestaña: {str(e)}")
     def _disconnect_browser_signals(self, browser):
@@ -549,6 +708,12 @@ class TabManager:
                 if hasattr(self.parent, 'tabs'):
                     if current_browser:
                         self._inject_dark_scrollbar_css(current_browser)
+            # Refrescar el texto de la pestaña (host del sitio) al cambiar de URL
+            try:
+                page_title = sender_browser.page().title() if sender_browser else ""
+                self.update_tab_title(page_title, sender_browser)
+            except Exception:
+                pass
             else:
                 print(f"[URL_CHANGED] ✗ NO es la pestaña activa - NO actualizando URL bar")
         except Exception as e:

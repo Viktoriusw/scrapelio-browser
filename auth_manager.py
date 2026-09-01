@@ -474,9 +474,7 @@ class AuthManager(QObject):
         # Validar entrada
 
         if not email or not password:
-            return AuthResult(False, AuthError.INVALID_CREDENTIALS, "Email and password are required")
-        if "@" not in email:
-            return AuthResult(False, AuthError.INVALID_CREDENTIALS, "Invalid email format")
+            return AuthResult(False, AuthError.INVALID_CREDENTIALS, "User ID and password are required")
         # Verificar límite de intentos
 
         current_time = time.time()

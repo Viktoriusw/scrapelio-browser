@@ -1,0 +1,40 @@
+{
+    "id": "themes",
+    "name": "Custom Themes",
+    "description": "Gestión avanzada de temas con editor visual, selector intuitivo y soporte para temas personalizados. Integrado con el sistema de temas consolidado del navegador.",
+    "version": "2.0.0",
+    "author": "Scrapelio Team",
+    "category": "customization",
+    "tags": ["themes", "customization", "ui", "design", "visual", "colors"],
+    "price": 0,
+    "currency": "USD",
+    "billing_cycle": "free",
+    "trial_days": 0,
+    "features": [
+        "Selector visual de temas con previsualizaciones",
+        "Editor de temas con interfaz gráfica",
+        "Soporte para temas Light y Dark",
+        "Creación de temas personalizados",
+        "Editor de colores con selector visual",
+        "Configuración de fuentes y espaciados",
+        "Importar y exportar temas",
+        "Vista previa en tiempo real",
+        "Integración completa con ThemeEngine",
+        "Guardar temas personalizados"
+    ],
+    "dependencies": [],
+    "compatibility": ">=1.0.0",
+    "premium": false,
+    "icon": "🎨",
+    "screenshots": [],
+    "min_browser_version": "1.0.0",
+    "max_browser_version": "999.0.0",
+    "permissions": ["ui_modification"],
+    "changelog": {
+        "2.0.0": "Refactorización completa: nuevo sistema basado en PluginBase, integración con ThemeEngine consolidado, editor mejorado con tabs y vista previa en tiempo real",
+        "1.0.0": "Versión inicial con temas predefinidos"
+    }
+}
+
+
+

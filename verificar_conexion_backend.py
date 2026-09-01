@@ -109,9 +109,9 @@ def main():
         # Dashboard URL no tiene getter, construir manualmente
         dashboard_url = f"{frontend_url}/app/dashboard.html"
     else:
-        # URLs hardcodeadas (nueva IP)
-        backend_url = "http://74.208.93.181:8000"
-        frontend_url = "http://192.168.1.174:4321"
+        # URLs por defecto (dominio público vía Cloudflare Tunnel)
+        backend_url = "https://api.scrapelio.com"
+        frontend_url = "https://scrapelio.com"
         registration_url = f"{frontend_url}/auth/registro.html"
         login_url = f"{frontend_url}/auth/login.html"
         dashboard_url = f"{frontend_url}/app/dashboard.html"
@@ -170,7 +170,7 @@ def main():
     if exitosos == total:
         print("PERFECTO! Todos los servicios estan accesibles")
         print()
-        print("El navegador puede conectarse al backend en la nueva IP: 74.208.93.181")
+        print("El navegador puede conectarse al backend en https://api.scrapelio.com")
         print()
         return 0
     elif exitosos >= total // 2:
@@ -191,11 +191,11 @@ def main():
         print(f"   Solo {exitosos}/{total} servicios funcionando")
         print()
         print("💡 Sugerencias:")
-        print("   1. Verifica que el servidor backend esté ejecutándose en 74.208.93.181:8000")
-        print("   2. Verifica que el servidor web esté ejecutándose en 192.168.1.174:4321")
+        print("   1. Verifica que el backend esté accesible en https://api.scrapelio.com")
+        print("   2. Verifica que el servidor web esté accesible en scrapelio.com")
         print("   3. Verifica la conectividad de red:")
-        print(f"      ping 74.208.93.181")
-        print("   4. Verifica que los puertos 8000 y 4321 estén abiertos")
+        print(f"      ping api.scrapelio.com")
+        print("   4. Verifica que no haya problemas de DNS o con el túnel de Cloudflare")
         print()
         return 2
 

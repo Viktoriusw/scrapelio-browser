@@ -39,7 +39,11 @@
     "card_background": "#3C3F41",
     "card_border": "#5F6368",
     "icon_color": "#9AA0A6",
-    "glow_accent": "#8AB4F8"
+    "glow_accent": "#8AB4F8",
+    "url_bar_background": "#3C3F41",
+    "url_bar_text": "#E8EAED",
+    "url_bar_border": "#4E5254",
+    "url_bar_placeholder": "#9AA0A6"
   },
   "fonts": {
     "family": "Segoe UI, Arial, sans-serif",

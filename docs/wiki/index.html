@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scrapelio Browser — Documentation Wiki</title>
+  <style>
+    /* ─── Reset & Base ────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0f1117;
+      --bg-soft:      #161b27;
+      --surface:      #1e2535;
+      --surface-2:    #242c3d;
+      --border:       rgba(255,255,255,0.08);
+      --border-hover: rgba(255,255,255,0.16);
+      --text:         #e8ecf4;
+      --text-muted:   #8b95a8;
+      --accent:       #4b9eff;
+      --accent-glow:  rgba(75,158,255,0.15);
+      --accent-dark:  #2563eb;
+      --success:      #34d399;
+      --warning:      #fbbf24;
+      --tag-bg:       rgba(75,158,255,0.1);
+      --radius:       8px;
+      --radius-lg:    14px;
+      --sidebar-w:    260px;
+      --font:         'Segoe UI', system-ui, -apple-system, sans-serif;
+      --font-mono:    'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────────────── */
+    .layout {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ─── Sidebar ────────────────────────────────────────────────────── */
+    .sidebar {
+      width: var(--sidebar-w);
+      background: var(--bg-soft);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 5px; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+    .sidebar-brand {
+      padding: 24px 20px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-brand .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+    }
+
+    .sidebar-brand .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+      box-shadow: 0 4px 14px rgba(75,158,255,0.3);
+    }
+
+    .sidebar-brand .logo-text { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+    .sidebar-brand .logo-sub  { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+    .sidebar-version {
+      display: inline-block;
+      background: var(--tag-bg);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-top: 10px;
+      border: 1px solid rgba(75,158,255,0.25);
+    }
+
+    .sidebar-nav {
+      padding: 16px 12px;
+      flex: 1;
+    }
+
+    .nav-section {
+      margin-bottom: 20px;
+    }
+
+    .nav-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 0 8px;
+      margin-bottom: 6px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      text-decoration: none;
+      color: var(--text-muted);
+      font-size: 13.5px;
+      transition: all 0.15s;
+      cursor: pointer;
+    }
+
+    .nav-link:hover,
+    .nav-link.active {
+      color: var(--text);
+      background: rgba(255,255,255,0.06);
+    }
+
+    .nav-link.active { color: var(--accent); background: var(--tag-bg); }
+
+    .nav-link .icon {
+      width: 16px;
+      text-align: center;
+      font-size: 13px;
+      opacity: 0.7;
+    }
+
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+    .sidebar-footer a { color: var(--accent); text-decoration: none; }
+
+    /* ─── Main Content ───────────────────────────────────────────────── */
+    .main {
+      flex: 1;
+      min-width: 0;
+      padding: 48px 60px 100px;
+      max-width: 900px;
+    }
+
+    @media (max-width: 1100px) { .main { padding: 36px 32px 80px; } }
+
+    /* ─── Hero ───────────────────────────────────────────────────────── */
+    .hero {
+      margin-bottom: 60px;
+      padding-bottom: 48px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--tag-bg);
+      border: 1px solid rgba(75,158,255,0.3);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.15;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, #e8ecf4 0%, #8b95a8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero .lead {
+      font-size: 17px;
+      color: var(--text-muted);
+      line-height: 1.75;
+      max-width: 640px;
+      margin-bottom: 28px;
+    }
+
+    .hero-meta {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .meta-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      background: var(--surface);
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+
+    .meta-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .dot-blue   { background: var(--accent); }
+    .dot-green  { background: var(--success); }
+    .dot-yellow { background: var(--warning); }
+
+    /* ─── Sections ───────────────────────────────────────────────────── */
+    .section {
+      margin-bottom: 64px;
+      scroll-margin-top: 24px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-icon {
+      width: 36px;
+      height: 36px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      flex-shrink: 0;
+    }
+
+    .section h2 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+    }
+
+    h3 {
+      font-size: 16px;
+      font-weight: 650;
+      margin: 28px 0 10px;
+      color: var(--text);
+    }
+
+    p {
+      color: var(--text-muted);
+      margin-bottom: 14px;
+    }
+
+    strong { color: var(--text); }
+
+    /* ─── Feature Grid ───────────────────────────────────────────────── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 18px 16px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--border-hover);
+      background: var(--surface-2);
+    }
+
+    .feature-card .card-icon {
+      font-size: 22px;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .feature-card .card-title {
+      font-size: 14px;
+      font-weight: 650;
+      color: var(--text);
+      margin-bottom: 5px;
+    }
+
+    .feature-card .card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.55;
+      margin-bottom: 0;
+    }
+
+    /* ─── Info Boxes ─────────────────────────────────────────────────── */
+    .info-box {
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      margin: 20px 0;
+      border-left: 3px solid;
+      font-size: 13.5px;
+    }
+
+    .info-box.note   { background: rgba(75,158,255,0.07);  border-color: var(--accent);   color: #a8c8ff; }
+    .info-box.tip    { background: rgba(52,211,153,0.07);  border-color: var(--success);  color: #86efac; }
+    .info-box.warn   { background: rgba(251,191,36,0.07);  border-color: var(--warning);  color: #fde68a; }
+
+    .info-box strong { color: inherit; opacity: 0.9; }
+
+    /* ─── Tables ─────────────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; margin: 16px 0; border-radius: var(--radius); border: 1px solid var(--border); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+
+    thead th {
+      background: var(--surface-2);
+      padding: 11px 16px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    tbody td {
+      padding: 11px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      vertical-align: top;
+    }
+
+    tbody tr:last-child td { border-bottom: none; }
+
+    tbody tr:hover td { background: rgba(255,255,255,0.02); }
+
+    td strong { color: var(--text); font-weight: 600; }
+
+    td code {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    /* ─── Code Blocks ────────────────────────────────────────────────── */
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.65;
+      color: #c9d1d9;
+      margin: 16px 0;
+    }
+
+    pre .kw  { color: #ff7b72; }
+    pre .str { color: #a5d6ff; }
+    pre .cm  { color: #8b949e; font-style: italic; }
+    pre .fn  { color: #d2a8ff; }
+    pre .var { color: #ffa657; }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 7px;
+      color: var(--accent);
+    }
+
+    /* ─── Shortcut Keys ──────────────────────────────────────────────── */
+    .shortcuts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 700px) { .shortcuts-grid { grid-template-columns: 1fr; } }
+
+    .shortcut-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-size: 13px;
+    }
+
+    .shortcut-row .action { color: var(--text-muted); }
+
+    .shortcut-row .keys { display: flex; gap: 4px; }
+
+    kbd {
+      background: var(--surface-2);
+      border: 1px solid var(--border-hover);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      padding: 2px 8px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    /* ─── Steps ──────────────────────────────────────────────────────── */
+    .steps { list-style: none; margin: 16px 0; }
+
+    .steps li {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 16px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      width: 26px;
+      height: 26px;
+      background: var(--accent-glow);
+      border: 1px solid rgba(75,158,255,0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .step-body { flex: 1; }
+    .step-body strong { color: var(--text); display: block; margin-bottom: 3px; font-size: 14px; }
+    .step-body p { margin-bottom: 0; font-size: 13.5px; }
+
+    /* ─── Tech Stack ─────────────────────────────────────────────────── */
+    .tech-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .tech-tag {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 14px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      transition: border-color 0.15s;
+    }
+
+    .tech-tag:hover { border-color: var(--border-hover); color: var(--text); }
+
+    /* ─── Divider ────────────────────────────────────────────────────── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 40px 0;
+    }
+
+    /* ─── Plugin card ─────────────────────────────────────────────────── */
+    .plugin-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 22px;
+      margin-bottom: 14px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      transition: border-color 0.15s;
+    }
+
+    .plugin-card:hover { border-color: var(--border-hover); }
+
+    .plugin-card .plugin-icon {
+      font-size: 26px;
+      width: 44px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .plugin-card .plugin-info { flex: 1; }
+
+    .plugin-card .plugin-name {
+      font-size: 15px;
+      font-weight: 650;
+      color: var(--text);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      letter-spacing: 0.3px;
+    }
+
+    .badge-free { background: rgba(52,211,153,0.12); color: var(--success); border: 1px solid rgba(52,211,153,0.25); }
+    .badge-open { background: rgba(75,158,255,0.1);  color: var(--accent);  border: 1px solid rgba(75,158,255,0.25); }
+
+    .plugin-card .plugin-desc {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      line-height: 1.55;
+    }
+
+    /* ─── Scroll top button ──────────────────────────────────────────── */
+    .back-top {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      width: 38px;
+      height: 38px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-hover);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: all 0.15s;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+
+    .back-top:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+    /* ─── Responsive ─────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      .main { padding: 28px 20px 60px; max-width: 100%; }
+      .hero h1 { font-size: 28px; }
+      .shortcuts-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ─── Sidebar ──────────────────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <a class="logo" href="#top">
+        <div class="logo-icon">🌐</div>
+        <div>
+          <div class="logo-text">Scrapelio</div>
+          <div class="logo-sub">Browser Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-version">v3.4</div>
+    </div>
+
+    <div class="sidebar-nav">
+
+      <div class="nav-section">
+        <div class="nav-label">Getting Started</div>
+        <a class="nav-link" href="#overview">       <span class="icon">📖</span> Overview</a>
+        <a class="nav-link" href="#tech-stack">     <span class="icon">⚙️</span> Tech Stack</a>
+        <a class="nav-link" href="#installation">   <span class="icon">📦</span> Installation</a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Core Features</div>
+        <a class="nav-link" href="#navigation">     <span class="icon">🧭</span> Navigation</a>
+        <a class="nav-link" href="#tabs">           <span class="icon">🗂️</span> Tab Management</a>
+        <a class="nav-link" href="#bookmarks">      <span class="icon">🔖</span> Bookmarks</a>
+        <a class="nav-link" href="#history">        <span class="icon">🕰️</span> History</a>
+        <a class="nav-link" href="#downloads">      <span class="icon">⬇️</span> Downloads</a>
+        <a class="nav-link" href="#passwords">      <span class="icon">🔑</span> Password Manager</a>
+        <a class="nav-link" href="#find">           <span class="icon">🔍</span> Find in Page</a>
+        <a class="nav-link" href="#screenshots">    <span class="icon">📸</span> Screenshots</a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">AI Features</div>
+        <a class="nav-link" href="#ai-chat">        <span class="icon">🤖</span> AI Chat</a>
+        <a class="nav-link" href="#gentab">         <span class="icon">✨</span> GenTab</a>
+        <a class="nav-link" href="#ai-navigation">  <span class="icon">🧠</span> AI Navigation</a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Privacy & Security</div>
+        <a class="nav-link" href="#privacy">        <span class="icon">🛡️</span> Privacy</a>
+        <a class="nav-link" href="#tor">            <span class="icon">🧅</span> Tor</a>
+        <a class="nav-link" href="#profiles">       <span class="icon">👤</span> Profiles</a>
+        <a class="nav-link" href="#userscripts">    <span class="icon">📜</span> User Scripts</a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Customisation</div>
+        <a class="nav-link" href="#themes">         <span class="icon">🎨</span> Themes</a>
+        <a class="nav-link" href="#search-engines"> <span class="icon">🔎</span> Search Engines</a>
+        <a class="nav-link" href="#split-view">     <span class="icon">⬜</span> Split View</a>
+        <a class="nav-link" href="#plugins">        <span class="icon">🧩</span> Plugin System</a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Developer Tools</div>
+        <a class="nav-link" href="#devtools">       <span class="icon">🛠️</span> DevTools</a>
+        <a class="nav-link" href="#logs">           <span class="icon">📋</span> Log Viewer</a>
+        <a class="nav-link" href="#shortcuts">      <span class="icon">⌨️</span> Shortcuts</a>
+        <a class="nav-link" href="#config">         <span class="icon">📄</span> Configuration</a>
+      </div>
+
+    </div>
+
+    <div class="sidebar-footer">
+      Open source · <a href="https://scrapelio.com" target="_blank">scrapelio.com</a>
+    </div>
+  </nav>
+
+  <!-- ─── Main ─────────────────────────────────────────────────────── -->
+  <main class="main" id="top">
+
+    <!-- Hero -->
+    <div class="hero">
+      <div class="hero-badge">
+        <span>📖</span> Official Documentation
+      </div>
+      <h1>Scrapelio Browser</h1>
+      <p class="lead">
+        An open-source, privacy-first desktop browser built in Python with PySide6 and Qt WebEngine.
+        Includes an integrated AI assistant, a modular plugin system, Tor support, and advanced
+        privacy controls — all in a clean, minimal interface.
+      </p>
+      <div class="hero-meta">
+        <div class="meta-pill"><span class="dot dot-blue"></span> Python + PySide6</div>
+        <div class="meta-pill"><span class="dot dot-green"></span> Open Source</div>
+        <div class="meta-pill"><span class="dot dot-yellow"></span> v3.4 · Linux x64</div>
+      </div>
+    </div>
+
+    <!-- ─── OVERVIEW ──────────────────────────────────────────────── -->
+    <section class="section" id="overview">
+      <div class="section-header">
+        <div class="section-icon">📖</div>
+        <h2>Overview</h2>
+      </div>
+      <p>
+        Scrapelio Browser is a <strong>desktop web browser</strong> designed for developers,
+        researchers, and privacy-conscious users. It combines the rendering power of
+        <strong>Qt WebEngine (Chromium)</strong> with a rich set of built-in tools:
+        an AI chat copilot, a hierarchical bookmark manager, a password manager, a
+        screenshot suite, Tor integration, and an extensible plugin system.
+      </p>
+      <p>
+        The base browser is <strong>free and open source</strong>. Optional premium plugins
+        extend its functionality for professional use cases. All core features — including
+        the AI assistant — work without an account.
+      </p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="card-icon">🤖</span>
+          <div class="card-title">AI Copilot</div>
+          <p class="card-desc">Integrated Claude AI chat panel with page context awareness and generative tabs.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🛡️</span>
+          <div class="card-title">Privacy First</div>
+          <p class="card-desc">Built-in ad/tracker blocking, Tor routing, user-agent spoofing, and multiple privacy profiles.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🔑</span>
+          <div class="card-title">Password Manager</div>
+          <p class="card-desc">Encrypted local storage, auto-fill detection, password generator, and breach checking.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🗂️</span>
+          <div class="card-title">Smart Tabs</div>
+          <p class="card-desc">Tab groups, session restore, tab search, movable/closable tabs with full keyboard control.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🔖</span>
+          <div class="card-title">Bookmarks</div>
+          <p class="card-desc">Hierarchical folder tree, drag-and-drop, search, and HTML export compatible with Firefox/Chrome.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🧩</span>
+          <div class="card-title">Plugin System</div>
+          <p class="card-desc">Open architecture for third-party plugins. Free and premium plugins with trial periods.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TECH STACK ─────────────────────────────────────────────── -->
+    <section class="section" id="tech-stack">
+      <div class="section-header">
+        <div class="section-icon">⚙️</div>
+        <h2>Tech Stack</h2>
+      </div>
+      <p>
+        Scrapelio is written entirely in <strong>Python 3.10+</strong> and relies on a focused
+        set of dependencies:
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>UI Framework</strong></td><td><code>PySide6</code> / PyQt6</td><td>Widgets, signals/slots, layouts</td></tr>
+            <tr><td><strong>Web Engine</strong></td><td><code>QWebEngineView</code></td><td>Chromium-based page rendering</td></tr>
+            <tr><td><strong>AI Integration</strong></td><td>Anthropic Claude API</td><td>Chat copilot, GenTab generation</td></tr>
+            <tr><td><strong>Vector Context</strong></td><td>ChromaDB + sentence-transformers</td><td>Page content indexing for AI</td></tr>
+            <tr><td><strong>Privacy</strong></td><td>stem + PySocks</td><td>Tor SOCKS5 proxy routing</td></tr>
+            <tr><td><strong>Encryption</strong></td><td>cryptography (Fernet/PBKDF2)</td><td>Password vault encryption</td></tr>
+            <tr><td><strong>Auth</strong></td><td>JWT + PyJWT</td><td>Account login and plugin licenses</td></tr>
+            <tr><td><strong>Storage</strong></td><td>SQLite3 + QSettings</td><td>Bookmarks, passwords, session, preferences</td></tr>
+            <tr><td><strong>Networking</strong></td><td>requests</td><td>Backend API communication</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Runtime requirements</h3>
+      <div class="tech-list">
+        <span class="tech-tag">Python 3.10+</span>
+        <span class="tech-tag">PySide6 ≥ 6.5</span>
+        <span class="tech-tag">Qt WebEngine</span>
+        <span class="tech-tag">Linux x64 / Windows / macOS</span>
+        <span class="tech-tag">4 GB RAM (recommended)</span>
+      </div>
+    </section>
+
+    <!-- ─── INSTALLATION ───────────────────────────────────────────── -->
+    <section class="section" id="installation">
+      <div class="section-header">
+        <div class="section-icon">📦</div>
+        <h2>Installation</h2>
+      </div>
+
+      <ol class="steps">
+        <li>
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>Clone the repository</strong>
+            <p>Download the source code from the official repository.</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>Install Python dependencies</strong>
+            <pre><span class="kw">pip</span> install -r requirements.txt</pre>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>Configure the API key (optional — for AI features)</strong>
+            <p>Create a <code>.env</code> file in the project root and add your Anthropic key:</p>
+            <pre><span class="var">ANTHROPIC_API_KEY</span>=sk-ant-...</pre>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <strong>Run the browser</strong>
+            <pre><span class="kw">python3</span> main.py</pre>
+          </div>
+        </li>
+      </ol>
+
+      <div class="info-box tip">
+        <strong>Tip:</strong> Run <code>python3 check_dependencies.py</code> to verify all required packages are installed before starting.
+      </div>
+
+      <h3>Verify the connection to the backend</h3>
+      <pre><span class="kw">python3</span> verificar_conexion_backend.py</pre>
+      <p>This checks reachability of the Scrapelio API server (required for account login and premium plugin licensing).</p>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- ─── NAVIGATION ─────────────────────────────────────────────── -->
+    <section class="section" id="navigation">
+      <div class="section-header">
+        <div class="section-icon">🧭</div>
+        <h2>Navigation</h2>
+      </div>
+      <p>
+        The navigation toolbar sits at the top of the window. It is compact by design —
+        every element has a purpose.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Element</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Sidebar toggle</strong></td><td>Shows or hides the icon sidebar on the left.</td></tr>
+            <tr><td><strong>Back / Forward</strong></td><td>Navigate through the page history of the current tab.</td></tr>
+            <tr><td><strong>Reload</strong></td><td>Reloads the current page. During loading, click again to stop.</td></tr>
+            <tr><td><strong>History</strong></td><td>Opens the full browsing history panel.</td></tr>
+            <tr><td><strong>Search engine selector</strong></td><td>Switch the active search engine (DuckDuckGo, Google, Brave, etc.).</td></tr>
+            <tr><td><strong>URL / Search bar</strong></td><td>Type a URL to navigate or a query to search. Supports AI queries when the AI system is active.</td></tr>
+            <tr><td><strong>Bookmark button</strong></td><td>Save the current page to a bookmark folder.</td></tr>
+            <tr><td><strong>Favourites bar toggle</strong></td><td>Shows or hides the quick-access favourites toolbar.</td></tr>
+            <tr><td><strong>Tab search</strong></td><td>Filter open tabs in real time by typing keywords.</td></tr>
+            <tr><td><strong>Profile switcher</strong></td><td>Switch between user profiles with separate settings and cookies.</td></tr>
+            <tr><td><strong>Main menu (☰)</strong></td><td>Access all browser settings and features.</td></tr>
+            <tr><td><strong>Account button</strong></td><td>Log in to your Scrapelio account to access premium plugins.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Responsive layout</h3>
+      <p>
+        The toolbar adapts to the window width. At widths below <strong>950 px</strong>,
+        the tab search field is hidden. Below <strong>750 px</strong>, the profile switcher
+        is also hidden. Below <strong>600 px</strong>, only the essential URL bar,
+        menu button, and account button remain visible.
+      </p>
+    </section>
+
+    <!-- ─── TABS ───────────────────────────────────────────────────── -->
+    <section class="section" id="tabs">
+      <div class="section-header">
+        <div class="section-icon">🗂️</div>
+        <h2>Tab Management</h2>
+      </div>
+      <p>
+        Scrapelio uses a <strong>custom tab bar</strong> built on <code>QTabWidget</code>
+        with a <code>+</code> button that always appears immediately after the last tab.
+        Tabs are movable, closable, and can be searched in real time from the toolbar.
+      </p>
+
+      <h3>Key capabilities</h3>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="card-icon">🔄</span>
+          <div class="card-title">Session restore</div>
+          <p class="card-desc">All open tabs are saved when the browser closes and restored on the next launch (requires login).</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">📑</span>
+          <div class="card-title">Tab Groups</div>
+          <p class="card-desc">Organise related tabs into named groups with a dedicated Tab Groups panel.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🔍</span>
+          <div class="card-title">Tab Search</div>
+          <p class="card-desc">Filter all open tabs instantly by typing in the search field in the toolbar.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">↩️</span>
+          <div class="card-title">Reopen closed tab</div>
+          <p class="card-desc">Reopen the last closed tab with <kbd>Ctrl+Shift+T</kbd>.</p>
+        </div>
+      </div>
+
+      <h3>Per-tab privacy profiles</h3>
+      <p>
+        Each tab can be associated with a different <strong>browser profile</strong>,
+        which means separate cookies, storage, and network settings.
+        This allows you to be logged into the same site with different accounts simultaneously.
+      </p>
+
+      <div class="info-box note">
+        <strong>Split View:</strong> You can pin any tab as a persistent side panel visible while you browse other tabs. See the <a href="#split-view" style="color: var(--accent);">Split View</a> section.
+      </div>
+    </section>
+
+    <!-- ─── BOOKMARKS ──────────────────────────────────────────────── -->
+    <section class="section" id="bookmarks">
+      <div class="section-header">
+        <div class="section-icon">🔖</div>
+        <h2>Bookmarks</h2>
+      </div>
+      <p>
+        The bookmark system offers a <strong>hierarchical folder tree</strong> stored in a local
+        SQLite database. It replaces the flat bookmark list common in most browsers with
+        a proper nested folder structure.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Details</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Folder tree</strong></td><td>Unlimited nesting depth. Create, rename, delete folders via right-click context menu.</td></tr>
+            <tr><td><strong>Move bookmarks</strong></td><td>Move items between folders from the context menu.</td></tr>
+            <tr><td><strong>Quick search</strong></td><td>Filter bookmarks and folders by title or URL in real time.</td></tr>
+            <tr><td><strong>Open bookmark</strong></td><td>Double-click a bookmark to open it in the current tab.</td></tr>
+            <tr><td><strong>Add from toolbar</strong></td><td>Click the bookmark icon in the nav bar to save the current page. Choose the destination folder.</td></tr>
+            <tr><td><strong>Favourites bar</strong></td><td>A separate horizontal bar below the nav bar for quick one-click access. Toggle with the heart icon.</td></tr>
+            <tr><td><strong>Export to HTML</strong></td><td>Export all bookmarks as a standard HTML file compatible with Firefox, Chrome, and Edge.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Automatic migration</h3>
+      <p>
+        On first launch, if a flat bookmark database from an older version is detected,
+        Scrapelio automatically migrates it to the new hierarchical format without data loss.
+      </p>
+    </section>
+
+    <!-- ─── HISTORY ────────────────────────────────────────────────── -->
+    <section class="section" id="history">
+      <div class="section-header">
+        <div class="section-icon">🕰️</div>
+        <h2>History</h2>
+      </div>
+      <p>
+        Browsing history is stored locally in SQLite. The History panel (accessible from the
+        nav bar or <kbd>Ctrl+H</kbd>) shows a time-sorted list of visited pages with search
+        and delete capabilities.
+      </p>
+      <p>
+        History is linked to the user's session. When the user is not logged in,
+        history is cleared on browser close for added privacy.
+      </p>
+    </section>
+
+    <!-- ─── DOWNLOADS ──────────────────────────────────────────────── -->
+    <section class="section" id="downloads">
+      <div class="section-header">
+        <div class="section-icon">⬇️</div>
+        <h2>Downloads</h2>
+      </div>
+      <p>
+        The Download Manager panel (<kbd>Ctrl+J</kbd>) shows all active and completed
+        downloads with progress bars, file size information, and open/reveal-in-folder actions.
+      </p>
+      <p>
+        Downloads are handled by Qt's native download mechanism and stored in the system's
+        default <code>Downloads</code> folder.
+      </p>
+    </section>
+
+    <!-- ─── PASSWORDS ──────────────────────────────────────────────── -->
+    <section class="section" id="passwords">
+      <div class="section-header">
+        <div class="section-icon">🔑</div>
+        <h2>Password Manager</h2>
+      </div>
+      <p>
+        Scrapelio includes a <strong>built-in encrypted password manager</strong> that stores
+        credentials locally using <strong>Fernet symmetric encryption</strong> derived from
+        a master password via PBKDF2-HMAC-SHA256.
+      </p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="card-icon">💾</span>
+          <div class="card-title">Local encrypted vault</div>
+          <p class="card-desc">All credentials stored in an encrypted SQLite database. Never sent to any server.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🪟</span>
+          <div class="card-title">Save banner</div>
+          <p class="card-desc">A non-intrusive banner appears below the nav bar when credentials are detected on a form submit.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">⚙️</span>
+          <div class="card-title">Password generator</div>
+          <p class="card-desc">Generate strong, customisable passwords with configurable length, symbols, and complexity.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🔗</span>
+          <div class="card-title">Per-origin storage</div>
+          <p class="card-desc">Credentials are stored per URL origin (scheme + host + port) for precise auto-fill.</p>
+        </div>
+      </div>
+
+      <div class="info-box warn">
+        <strong>Note:</strong> The master password is never stored. If you forget it, the vault contents cannot be recovered. Keep it safe.
+      </div>
+    </section>
+
+    <!-- ─── FIND IN PAGE ───────────────────────────────────────────── -->
+    <section class="section" id="find">
+      <div class="section-header">
+        <div class="section-icon">🔍</div>
+        <h2>Find in Page</h2>
+      </div>
+      <p>
+        Press <kbd>Ctrl+F</kbd> to open the Find bar. It appears below the nav bar and
+        highlights all matches on the current page. Use <kbd>Enter</kbd> / <kbd>Shift+Enter</kbd>
+        to cycle through matches, or press <kbd>Esc</kbd> to close.
+      </p>
+      <p>The find system wraps Qt WebEngine's native text search, supporting case-sensitive matching and real-time highlighting as you type.</p>
+    </section>
+
+    <!-- ─── SCREENSHOTS ────────────────────────────────────────────── -->
+    <section class="section" id="screenshots">
+      <div class="section-header">
+        <div class="section-icon">📸</div>
+        <h2>Screenshots</h2>
+      </div>
+      <p>
+        Scrapelio ships with a <strong>three-mode screenshot suite</strong> accessible from the main menu
+        or via keyboard shortcuts.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Mode</th><th>Shortcut</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Full page</strong></td>
+              <td><code>Ctrl+Shift+S</code></td>
+              <td>Captures the entire visible area of the current tab.</td>
+            </tr>
+            <tr>
+              <td><strong>Region select</strong></td>
+              <td>Via main menu</td>
+              <td>Click-and-drag to select any rectangular region of the screen.</td>
+            </tr>
+            <tr>
+              <td><strong>Element select</strong></td>
+              <td>Via main menu</td>
+              <td>Click any element in the page to capture it precisely.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>All screenshots are saved as PNG files. An annotation editor allows you to draw, add text, and highlight areas before saving.</p>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- ─── AI CHAT ────────────────────────────────────────────────── -->
+    <section class="section" id="ai-chat">
+      <div class="section-header">
+        <div class="section-icon">🤖</div>
+        <h2>AI Chat Copilot</h2>
+      </div>
+      <p>
+        The <strong>AI Chat panel</strong> is the centrepiece of Scrapelio's AI integration.
+        It connects to large language models (Anthropic Claude, local models, or HuggingFace)
+        and acts as a browser copilot — aware of what you are browsing.
+      </p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="card-icon">💬</span>
+          <div class="card-title">Conversational interface</div>
+          <p class="card-desc">Full chat history in the current session. Ask follow-up questions naturally.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🌐</span>
+          <div class="card-title">Page context</div>
+          <p class="card-desc">The AI can read and analyse the content of the currently open page.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🔌</span>
+          <div class="card-title">Multiple providers</div>
+          <p class="card-desc">Supports Anthropic Claude, local LLM servers, LLM API, and HuggingFace models.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🗂️</span>
+          <div class="card-title">Multi-tab analysis</div>
+          <p class="card-desc">Analyse the content of all open tabs at once. Ask the AI for a summary or next steps.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🔗</span>
+          <div class="card-title">Smart link handling</div>
+          <p class="card-desc">Links in AI responses are converted into actionable searches or new tab opens.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">⚡</span>
+          <div class="card-title">Async execution</div>
+          <p class="card-desc">All AI calls run in a background thread. The browser stays fully responsive during generation.</p>
+        </div>
+      </div>
+
+      <h3>Supported providers</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Provider</th><th>How to configure</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Anthropic Claude</strong></td><td>Set <code>ANTHROPIC_API_KEY</code> in your <code>.env</code> file.</td></tr>
+            <tr><td><strong>Local LLM</strong></td><td>Point to a local OpenAI-compatible server (e.g. LM Studio, Ollama).</td></tr>
+            <tr><td><strong>LLM API (free)</strong></td><td>Uses the public LLM API endpoint — no key needed.</td></tr>
+            <tr><td><strong>HuggingFace</strong></td><td>Select from a curated list of HuggingFace Inference API models.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─── GENTAB ─────────────────────────────────────────────────── -->
+    <section class="section" id="gentab">
+      <div class="section-header">
+        <div class="section-icon">✨</div>
+        <h2>GenTab — Generative Tabs</h2>
+      </div>
+      <p>
+        <strong>GenTab</strong> (inspired by Google Disco / generative tabs) allows the AI to
+        create a fully interactive web application inside a browser tab, based on the content
+        of your current open tabs.
+      </p>
+      <p>
+        Open the GenTab panel with <kbd>Ctrl+G</kbd>. Select which open tabs to include
+        as context, write a prompt describing what you want (e.g. "create a comparison table
+        of all the products in these tabs"), and the AI generates a self-contained HTML
+        application that opens in a new tab.
+      </p>
+
+      <div class="info-box tip">
+        <strong>Examples:</strong> Use GenTab to generate research dashboards, data comparison tables,
+        reading lists, interactive maps, or visualisations — all from the content of your open tabs.
+      </div>
+    </section>
+
+    <!-- ─── AI NAVIGATION ─────────────────────────────────────────── -->
+    <section class="section" id="ai-navigation">
+      <div class="section-header">
+        <div class="section-icon">🧠</div>
+        <h2>AI Navigation System</h2>
+      </div>
+      <p>
+        The AI Navigation system runs passively in the background, building a semantic index
+        of the pages you visit using <strong>ChromaDB</strong> and
+        <strong>sentence-transformers</strong> embeddings.
+      </p>
+      <p>
+        Based on your browsing session, it detects your intent (research, shopping, coding, etc.)
+        and proactively surfaces <strong>suggestion toasts</strong> — non-intrusive notifications
+        with actionable links related to what you are doing.
+      </p>
+
+      <div class="info-box note">
+        <strong>Privacy:</strong> The AI Navigation index is stored entirely on your local machine. Page content is never sent to any server for indexing.
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- ─── PRIVACY ────────────────────────────────────────────────── -->
+    <section class="section" id="privacy">
+      <div class="section-header">
+        <div class="section-icon">🛡️</div>
+        <h2>Privacy &amp; Ad Blocking</h2>
+      </div>
+      <p>
+        Scrapelio includes a <strong>built-in network interceptor</strong> that operates at
+        the Qt WebEngine request level, blocking ads and trackers before they are loaded.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Ad blocking</strong></td><td>EasyList-compatible ABP filter rules. Blocks display ads network-wide.</td></tr>
+            <tr><td><strong>Tracker blocking</strong></td><td>EasyPrivacy rules block analytics and tracking pixels.</td></tr>
+            <tr><td><strong>User-agent spoofing</strong></td><td>Choose from Chrome, Firefox, Safari, or custom user-agent strings to prevent browser fingerprinting.</td></tr>
+            <tr><td><strong>Cookie controls</strong></td><td>Block third-party cookies, clear cookies on close, or disable all cookies per-profile.</td></tr>
+            <tr><td><strong>JavaScript toggle</strong></td><td>Disable JavaScript globally or per-site.</td></tr>
+            <tr><td><strong>Referrer control</strong></td><td>Strip or spoof the HTTP Referer header.</td></tr>
+            <tr><td><strong>HTTPS preference</strong></td><td>Prefer HTTPS connections automatically where available.</td></tr>
+            <tr><td><strong>Filter updates</strong></td><td>Block-lists can be updated from the Privacy panel.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─── TOR ────────────────────────────────────────────────────── -->
+    <section class="section" id="tor">
+      <div class="section-header">
+        <div class="section-icon">🧅</div>
+        <h2>Tor Network</h2>
+      </div>
+      <p>
+        Scrapelio includes native Tor support via the <strong>stem</strong> library and
+        a SOCKS5 proxy routed through a local Tor daemon. It follows the same workflow as
+        Tor Browser: the user activates Tor → bootstrap → automatic browser restart with
+        all traffic routed through Tor.
+      </p>
+
+      <h3>How to use Tor</h3>
+      <ol class="steps">
+        <li>
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>Install the Tor daemon</strong>
+            <p>On Linux: <code>sudo apt install tor</code>. The daemon must be running on ports <code>9150</code> (SOCKS) and <code>9151</code> (control).</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>Open the Tor panel</strong>
+            <p>Click the Tor icon in the left sidebar or navigate to the Tor section in Settings.</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>Click "Connect"</strong>
+            <p>The panel shows a bootstrap progress bar. When it reaches 100%, the browser restarts with all network traffic routed through Tor.</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <strong>Get a new identity</strong>
+            <p>Click "New Identity" to request a fresh Tor circuit and a new exit IP address without restarting.</p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="info-box warn">
+        <strong>Warning:</strong> Tor significantly reduces browsing speed. Use it when privacy is a priority, not for streaming or downloads.
+      </div>
+    </section>
+
+    <!-- ─── PROFILES ───────────────────────────────────────────────── -->
+    <section class="section" id="profiles">
+      <div class="section-header">
+        <div class="section-icon">👤</div>
+        <h2>User Profiles</h2>
+      </div>
+      <p>
+        Profiles provide <strong>separate browser environments</strong>: cookies, local storage,
+        cache, and privacy settings are completely isolated between profiles.
+      </p>
+      <p>
+        Switch profiles from the toolbar profile switcher (visible at window widths above
+        750 px). Each tab can optionally be pinned to a specific profile, allowing you
+        to be logged into the same site with different accounts simultaneously.
+      </p>
+
+      <h3>Practical uses</h3>
+      <ul style="color: var(--text-muted); padding-left: 20px; line-height: 2;">
+        <li>Personal vs. work browsing in the same window</li>
+        <li>Testing web apps with different user accounts</li>
+        <li>Separating social media sessions</li>
+        <li>Research profiles with specific privacy settings</li>
+      </ul>
+    </section>
+
+    <!-- ─── USER SCRIPTS ───────────────────────────────────────────── -->
+    <section class="section" id="userscripts">
+      <div class="section-header">
+        <div class="section-icon">📜</div>
+        <h2>User Scripts</h2>
+      </div>
+      <p>
+        Scrapelio supports <strong>custom JavaScript injection</strong> into pages via its
+        User Script Manager. Scripts are injected at page load time using
+        Qt WebEngine's <code>QWebEngineScript</code> API.
+      </p>
+      <p>
+        Access the User Script Manager from the main menu. You can create, edit, enable,
+        disable, and delete scripts. Each script targets a URL pattern and runs either
+        at <em>document start</em> or <em>document end</em>.
+      </p>
+
+      <div class="info-box note">
+        <strong>Compatibility:</strong> Scrapelio user scripts follow the same conventions as Greasemonkey/Tampermonkey scripts, making it straightforward to port existing scripts.
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- ─── THEMES ─────────────────────────────────────────────────── -->
+    <section class="section" id="themes">
+      <div class="section-header">
+        <div class="section-icon">🎨</div>
+        <h2>Themes</h2>
+      </div>
+      <p>
+        Scrapelio's appearance is controlled by a <strong>centralised ThemeEngine</strong>
+        (<code>ui/core/theme_engine.py</code>) that reads JSON theme files and applies
+        design tokens across all UI components in real time.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Token</th><th>Dark</th><th>Light</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>surface_0</code></td><td>#1A1A1A</td><td>#F5F5F5</td><td>Primary background</td></tr>
+            <tr><td><code>surface_1</code></td><td>#222222</td><td>#FFFFFF</td><td>Cards and panels</td></tr>
+            <tr><td><code>accent</code></td><td>#4B9EFF</td><td>#2563EB</td><td>Interactive elements</td></tr>
+            <tr><td><code>text_primary</code></td><td>#F0F0F0</td><td>#1A1A1A</td><td>Main text</td></tr>
+            <tr><td><code>text_secondary</code></td><td>#A0A0A0</td><td>#666666</td><td>Secondary text</td></tr>
+            <tr><td><code>border</code></td><td>rgba(255,255,255,0.08)</td><td>rgba(0,0,0,0.10)</td><td>Subtle borders</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        Theme changes are broadcast via Qt signals, so every panel and widget updates
+        instantly without a restart. Custom themes can be created as JSON files in the
+        <code>ui/themes/</code> directory.
+      </p>
+    </section>
+
+    <!-- ─── SEARCH ENGINES ─────────────────────────────────────────── -->
+    <section class="section" id="search-engines">
+      <div class="section-header">
+        <div class="section-icon">🔎</div>
+        <h2>Search Engines</h2>
+      </div>
+      <p>
+        The <strong>Search Engine Manager</strong> lets you define and switch the active
+        search engine from a button in the toolbar. Scrapelio ships with several pre-configured
+        engines and allows you to add custom ones.
+      </p>
+
+      <div class="tech-list">
+        <span class="tech-tag">DuckDuckGo</span>
+        <span class="tech-tag">Google</span>
+        <span class="tech-tag">Brave Search</span>
+        <span class="tech-tag">Bing</span>
+        <span class="tech-tag">Ecosia</span>
+        <span class="tech-tag">Startpage</span>
+        <span class="tech-tag">+ Custom engines</span>
+      </div>
+
+      <p style="margin-top: 14px;">
+        You can also switch the engine temporarily for a single search by clicking
+        the engine button and selecting an alternative — the default engine is not changed.
+      </p>
+    </section>
+
+    <!-- ─── SPLIT VIEW ─────────────────────────────────────────────── -->
+    <section class="section" id="split-view">
+      <div class="section-header">
+        <div class="section-icon">⬜</div>
+        <h2>Split View</h2>
+      </div>
+      <p>
+        The <strong>Split View plugin</strong> (free, built-in) adds a persistent side panel
+        to the right of the main content area. It behaves like an independent browser tab
+        with its own navigation bar, URL input, back/forward/reload controls, and
+        full context menu support.
+      </p>
+
+      <h3>How to activate</h3>
+      <p>
+        Right-click any tab in the tab bar and choose
+        <em>"Open in Split View"</em>. The Split View panel appears to the right of
+        the current tabs. You can browse normally in the main area while the Split View
+        keeps its own page visible.
+      </p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="card-icon">🖥️</span>
+          <div class="card-title">Independent navigation</div>
+          <p class="card-desc">Full back/forward/reload controls and URL bar — browse independently from the main tabs.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">🔗</span>
+          <div class="card-title">Open in new tab</div>
+          <p class="card-desc">Right-click any link in the Split View to open it in a main browser tab.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">💾</span>
+          <div class="card-title">Persistent URL</div>
+          <p class="card-desc">The last URL loaded in the Split View is remembered across browser sessions.</p>
+        </div>
+        <div class="feature-card">
+          <span class="card-icon">↔️</span>
+          <div class="card-title">Resizable</div>
+          <p class="card-desc">Drag the splitter handle to adjust how much space the Split View takes.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── PLUGINS ────────────────────────────────────────────────── -->
+    <section class="section" id="plugins">
+      <div class="section-header">
+        <div class="section-icon">🧩</div>
+        <h2>Plugin System</h2>
+      </div>
+      <p>
+        Scrapelio's plugin system is designed for <strong>extensibility</strong>. Any developer
+        can build a plugin and distribute it freely. Plugins are loaded dynamically at runtime
+        from the <code>plugins/</code> directory, with no browser restart required after
+        installation.
+      </p>
+
+      <h3>How plugins work</h3>
+      <ol class="steps">
+        <li>
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>Discovery</strong>
+            <p>The Plugin Manager scans <code>plugins/</code> at startup and reads each plugin's <code>plugin_info.json</code>.</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>Access check</strong>
+            <p>Free plugins load immediately. Premium plugins require a valid license or an active trial period.</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>Load</strong>
+            <p>The manager imports <code>plugin.py</code> via <code>importlib</code> and calls <code>initialize_plugin()</code>.</p>
+          </div>
+        </li>
+        <li>
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <strong>Integration</strong>
+            <p>The plugin receives a reference to the browser window and can add panels, sidebar buttons, toolbar actions, and page hooks.</p>
+          </div>
+        </li>
+      </ol>
+
+      <h3>Built-in plugins</h3>
+
+      <div class="plugin-card">
+        <div class="plugin-icon">⬜</div>
+        <div class="plugin-info">
+          <div class="plugin-name">Split View <span class="badge badge-free">Free</span> <span class="badge badge-open">Open Source</span></div>
+          <p class="plugin-desc">
+            Adds a persistent side panel with a full independent browser. Keep any page visible while browsing in the main tabs.
+            Includes navigation controls, URL bar, context menu, and session persistence.
+          </p>
+        </div>
+      </div>
+
+      <div class="plugin-card">
+        <div class="plugin-icon">🎨</div>
+        <div class="plugin-info">
+          <div class="plugin-name">Custom Themes <span class="badge badge-free">Free tier</span></div>
+          <p class="plugin-desc">
+            Visual theme selector and editor integrated with the browser's ThemeEngine.
+            Supports light, dark, and fully custom themes with a real-time preview editor.
+            Basic themes are free; the advanced editor requires a subscription.
+          </p>
+        </div>
+      </div>
+
+      <h3>Building your own plugin</h3>
+      <p>
+        Scrapelio's plugin API is fully documented. Any Python developer can create a plugin
+        that adds panels, toolbar buttons, page hooks, or entirely new features to the browser.
+      </p>
+      <p>
+        Refer to the <strong><a href="../plugin-development-guide.md" style="color: var(--accent);">Plugin Development Guide</a></strong>
+        for the complete API reference, code templates, and step-by-step tutorials.
+      </p>
+
+      <div class="info-box tip">
+        <strong>Open architecture:</strong> All plugin APIs are public. Free plugins can be distributed with any license. There are no API fees or approval gates for open-source plugins.
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- ─── DEVTOOLS ───────────────────────────────────────────────── -->
+    <section class="section" id="devtools">
+      <div class="section-header">
+        <div class="section-icon">🛠️</div>
+        <h2>Developer Tools</h2>
+      </div>
+      <p>
+        Press <kbd>F12</kbd> to open the built-in <strong>DevTools</strong> panel,
+        powered by Qt WebEngine's Chromium DevTools integration. It docks to the right
+        or bottom of the window and provides the full Chromium DevTools experience:
+        Elements, Console, Network, Sources, Performance, and more.
+      </p>
+      <p>
+        You can also open DevTools from the right-click context menu on any page by selecting
+        <em>"Inspect"</em>.
+      </p>
+
+      <h3>View Page Source</h3>
+      <p>Press <kbd>Ctrl+U</kbd> to open the raw HTML source of the current page in a new tab.</p>
+    </section>
+
+    <!-- ─── LOGS ───────────────────────────────────────────────────── -->
+    <section class="section" id="logs">
+      <div class="section-header">
+        <div class="section-icon">📋</div>
+        <h2>Log Viewer</h2>
+      </div>
+      <p>
+        The <strong>Log Viewer panel</strong> shows all internal browser log messages in
+        real time with colour-coded severity levels.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Level</th><th>Colour</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>DEBUG</code></td>  <td style="color:#94a3b8;">Blue-grey</td> <td>Verbose diagnostic info</td></tr>
+            <tr><td><code>INFO</code></td>   <td style="color:#4ade80;">Green</td>     <td>Normal operation events</td></tr>
+            <tr><td><code>WARNING</code></td><td style="color:#fbbf24;">Amber</td>     <td>Non-critical issues</td></tr>
+            <tr><td><code>ERROR</code></td>  <td style="color:#f87171;">Red</td>       <td>Recoverable errors</td></tr>
+            <tr><td><code>CRITICAL</code></td><td style="color:#f0abfc;">Purple</td>   <td>Fatal or severe issues</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Features: real-time auto-scroll, filter by level and module name, full-text search, and export to a plain-text file. Logs are also written to <code>scrapelio_browser.log</code> on disk with automatic rotation.</p>
+    </section>
+
+    <!-- ─── SHORTCUTS ─────────────────────────────────────────────── -->
+    <section class="section" id="shortcuts">
+      <div class="section-header">
+        <div class="section-icon">⌨️</div>
+        <h2>Keyboard Shortcuts</h2>
+      </div>
+
+      <h3>Navigation</h3>
+      <div class="shortcuts-grid">
+        <div class="shortcut-row"><span class="action">New tab</span>               <span class="keys"><kbd>Ctrl</kbd><kbd>T</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Reopen closed tab</span>     <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd></span></div>
+        <div class="shortcut-row"><span class="action">New window</span>            <span class="keys"><kbd>Ctrl</kbd><kbd>N</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Private window</span>        <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Close browser</span>        <span class="keys"><kbd>Ctrl</kbd><kbd>Q</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Fullscreen</span>           <span class="keys"><kbd>F11</kbd></span></div>
+      </div>
+
+      <h3>Page</h3>
+      <div class="shortcuts-grid">
+        <div class="shortcut-row"><span class="action">Find in page</span>         <span class="keys"><kbd>Ctrl</kbd><kbd>F</kbd></span></div>
+        <div class="shortcut-row"><span class="action">View source</span>          <span class="keys"><kbd>Ctrl</kbd><kbd>U</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Print page</span>           <span class="keys"><kbd>Ctrl</kbd><kbd>P</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Save page</span>            <span class="keys"><kbd>Ctrl</kbd><kbd>S</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Zoom in</span>              <span class="keys"><kbd>Ctrl</kbd><kbd>+</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Zoom out</span>             <span class="keys"><kbd>Ctrl</kbd><kbd>-</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Reset zoom</span>           <span class="keys"><kbd>Ctrl</kbd><kbd>0</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Screenshot</span>           <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd></span></div>
+      </div>
+
+      <h3>Panels &amp; Tools</h3>
+      <div class="shortcuts-grid">
+        <div class="shortcut-row"><span class="action">Developer Tools</span>      <span class="keys"><kbd>F12</kbd></span></div>
+        <div class="shortcut-row"><span class="action">GenTab panel</span>         <span class="keys"><kbd>Ctrl</kbd><kbd>G</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Downloads</span>            <span class="keys"><kbd>Ctrl</kbd><kbd>J</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Downloads (alt)</span>      <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Y</kbd></span></div>
+        <div class="shortcut-row"><span class="action">Plugin Store</span>        <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></span></div>
+      </div>
+    </section>
+
+    <!-- ─── CONFIGURATION ─────────────────────────────────────────── -->
+    <section class="section" id="config">
+      <div class="section-header">
+        <div class="section-icon">📄</div>
+        <h2>Configuration</h2>
+      </div>
+      <p>
+        All persistent settings are stored in <code>config.yaml</code> at the project root.
+        The file is loaded at startup by <code>config_manager.py</code>. You can edit it
+        with any text editor; changes take effect on the next browser launch.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Section</th><th>Key settings</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>backend</strong></td>
+              <td><code>primary_url</code> — the Scrapelio API server address used for authentication and plugin licensing.</td>
+            </tr>
+            <tr>
+              <td><strong>frontend</strong></td>
+              <td><code>url</code>, <code>login_url</code>, <code>registration_url</code>, <code>dashboard_url</code> — links to the Scrapelio web portal.</td>
+            </tr>
+            <tr>
+              <td><strong>database</strong></td>
+              <td>Paths to the bookmark (<code>bookmarks.db</code>), password (<code>passwords.db</code>), and session (<code>session.db</code>) SQLite files.</td>
+            </tr>
+            <tr>
+              <td><strong>logging</strong></td>
+              <td>Log level (<code>INFO</code> by default), log file path, max file size (10 MB), and backup count (3).</td>
+            </tr>
+            <tr>
+              <td><strong>network</strong></td>
+              <td>Connection timeout (10 s), health check interval (30 s), network mode.</td>
+            </tr>
+            <tr>
+              <td><strong>plugins</strong></td>
+              <td>Plugin directory, backup directory, checksum validation, cache duration (300 s).</td>
+            </tr>
+            <tr>
+              <td><strong>security</strong></td>
+              <td>JWT algorithm, token expiry, secret key. Change the secret key in production.</td>
+            </tr>
+            <tr>
+              <td><strong>tor</strong></td>
+              <td>SOCKS port (9150), control port (9151), enabled flag.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Environment variables</h3>
+      <p>Sensitive values (API keys) should be placed in a <code>.env</code> file at the project root:</p>
+      <pre><span class="cm"># .env — never commit this file to version control</span>
+<span class="var">ANTHROPIC_API_KEY</span>=<span class="str">sk-ant-your-key-here</span></pre>
+      <p>The <code>.env</code> file is loaded automatically on startup and is already listed in <code>.gitignore</code>.</p>
+    </section>
+
+  </main>
+</div>
+
+<!-- ─── Back to top ──────────────────────────────────────────────── -->
+<a class="back-top" href="#top" title="Back to top">↑</a>
+
+<!-- ─── Active nav highlight ─────────────────────────────────────── -->
+<script>
+  const links = document.querySelectorAll('.nav-link');
+  const sections = document.querySelectorAll('.section');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${entry.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+
+</body>
+</html>

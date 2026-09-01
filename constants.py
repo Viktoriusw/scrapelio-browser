@@ -170,7 +170,8 @@ LOG_PREFIX_OK = "[OK]"
 # ============================================================================
 
 # Límites de rendimiento
-MAX_FILTER_RULES = 100
+# Límite por archivo de lista (líneas leídas); 100 era insuficiente para listas ABP reales
+MAX_FILTER_RULES = 60000
 MAX_LOGIN_ATTEMPTS = 3
 MAX_RETRY_ATTEMPTS = 3
 
@@ -187,11 +188,12 @@ MAX_RETRY_DELAY = 30.0
 # CONFIGURACIÓN DE PERFORMANCE
 # ============================================================================
 
-# Flags de optimización
+# Flags de optimización — EasyList/EasyPrivacy: sin ellos el “Block Ads” casi no bloquea
+# (solo custom_filters.txt). Valores previos (True/True + MAX 100) dejaban ~16 reglas.
 ASYNC_FILTER_LOADING = True
 LOAD_BASIC_FILTERS_ONLY = True
-SKIP_HEAVY_FILTERS = True
-DISABLE_HEAVY_FILTERS = True
+SKIP_HEAVY_FILTERS = False
+DISABLE_HEAVY_FILTERS = False
 
 # ============================================================================
 # CONFIGURACIÓN DE GENTAB (Pestañas Generativas)

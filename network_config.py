@@ -87,13 +87,13 @@ NETWORK_CONFIG = {
 
     "network": {
 
-        "backend_ip": "74.208.93.181",  # Backend API
+        "backend_ip": "api.scrapelio.com",  # Backend API
 
-        "website_ip": "74.208.93.181",  # Sitio Web
+        "website_ip": "scrapelio.com",  # Sitio Web
 
-        "backend_port": 8000,  # Puerto del backend (cambiar seg?n tu configuraci?n)
+        "backend_port": 443,  # HTTPS vía Cloudflare Tunnel
 
-        "website_port": 4321,
+        "website_port": 443,
 
         "timeout": 10,  # Timeout por defecto
 
@@ -127,7 +127,7 @@ FALLBACK_ENDPOINTS = {
 
     "backend": [
 
-        "http://74.208.93.181:8000",
+        "https://api.scrapelio.com",
 
         "http://localhost:8000",
 
@@ -136,7 +136,7 @@ FALLBACK_ENDPOINTS = {
 
     "website": [
 
-        "http://192.168.1.174:4321",
+        "https://scrapelio.com",
 
         "http://localhost:8001",
 
@@ -165,7 +165,7 @@ class NetworkManager:
 
             name="Backend API",
 
-            url=f"http://{config['backend_ip']}:{config['backend_port']}",
+            url=f"{'https' if config['backend_port'] == 443 else 'http'}://{config['backend_ip']}:{config['backend_port']}",
 
             ip=config["backend_ip"],
 
@@ -182,7 +182,7 @@ class NetworkManager:
 
             name="Website",
 
-            url=f"http://{config['website_ip']}:{config['website_port']}",
+            url=f"{'https' if config['website_port'] == 443 else 'http'}://{config['website_ip']}:{config['website_port']}",
 
             ip=config["website_ip"],
 
@@ -289,7 +289,9 @@ class NetworkManager:
 
         config = self._get_base_config()
 
-        return f"http://{config['backend_ip']}:{config['backend_port']}"
+        scheme = 'https' if config['backend_port'] == 443 else 'http'
+
+        return f"{scheme}://{config['backend_ip']}:{config['backend_port']}"
     def get_website_url(self) -> str:
         """Obtener URL del sitio web con fallback"""
 
@@ -301,7 +303,9 @@ class NetworkManager:
 
         config = self._get_base_config()
 
-        return f"http://{config['website_ip']}:{config['website_port']}"
+        scheme = 'https' if config['website_port'] == 443 else 'http'
+
+        return f"{scheme}://{config['website_ip']}:{config['website_port']}"
     def get_all_status(self) -> Dict[str, NetworkStatus]:
         """Obtener estado de todos los endpoints"""
 

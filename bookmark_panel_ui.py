@@ -19,6 +19,14 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
+
+try:
+    from favicon_manager import get_favicon_manager, _domain as _favicon_domain
+    _FAVICON_AVAILABLE = True
+except ImportError:
+    _FAVICON_AVAILABLE = False
+    def get_favicon_manager(): return None
+    def _favicon_domain(url): return ""
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -106,44 +114,78 @@ class AddBookmarkDialog(QDialog):
         current_folder_id: int = 1,
     ):
         super().__init__(parent)
+        self._folders_manager = folders_manager
         self.setWindowTitle("Guardar marcador")
         self.setModal(True)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(8)
 
         # Título
-        layout.addWidget(QLabel("Título:"))
+        layout.addWidget(QLabel("Nombre:"))
         self.title_edit = QLineEdit(title)
         layout.addWidget(self.title_edit)
 
         # URL
         layout.addWidget(QLabel("URL:"))
         self.url_edit = QLineEdit(url)
+        self.url_edit.setReadOnly(True)
         layout.addWidget(self.url_edit)
 
-        # Carpeta destino
+        # Carpeta destino + botón nueva carpeta
         layout.addWidget(QLabel("Guardar en carpeta:"))
+        folder_row = QHBoxLayout()
         self.folder_combo = QComboBox()
         self._populate_folders(folders_manager, current_folder_id)
-        layout.addWidget(self.folder_combo)
+        folder_row.addWidget(self.folder_combo, stretch=1)
+        new_folder_btn = QPushButton("+ Nueva carpeta")
+        new_folder_btn.setFixedWidth(130)
+        new_folder_btn.setToolTip("Crear una nueva carpeta y seleccionarla")
+        new_folder_btn.clicked.connect(self._on_new_folder)
+        folder_row.addWidget(new_folder_btn)
+        layout.addLayout(folder_row)
 
-        # Botones
+        # Botones OK / Cancelar
+        layout.addSpacing(4)
         btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Cancelar")
+        cancel_btn.clicked.connect(self.reject)
         save_btn = QPushButton("Guardar")
         save_btn.setDefault(True)
         save_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton("Cancelar")
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(save_btn)
         btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
         layout.addLayout(btn_row)
+
+    def _on_new_folder(self) -> None:
+        """Crea una nueva carpeta y la selecciona en el combo."""
+        if not self._folders_manager:
+            return
+        name, ok = QInputDialog.getText(self, "Nueva carpeta", "Nombre de la carpeta:")
+        if not ok or not name.strip():
+            return
+        try:
+            # Crear como hija de la carpeta actualmente seleccionada
+            parent_id = self.folder_combo.currentData() or 1
+            new_folder = self._folders_manager.create_folder(name.strip(), parent_id)
+            new_id = getattr(new_folder, "id", None)
+            # Refrescar el combo y seleccionar la nueva carpeta
+            self._populate_folders(self._folders_manager, new_id or 1)
+            if new_id:
+                idx = self.folder_combo.findData(new_id)
+                if idx >= 0:
+                    self.folder_combo.setCurrentIndex(idx)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo crear la carpeta:\n{exc}")
+
     def _populate_folders(self, folders_manager, current_folder_id: int):
         """Rellena el combo con todas las carpetas (árbol aplanado con sangría)."""
+        self.folder_combo.clear()
         if folders_manager is None:
             self.folder_combo.addItem("📁 Marcadores", 1)
             return
-        self.folder_combo.clear()
         selected_index = 0
 
         def _add(parent_id: int, indent: str = ""):
@@ -154,18 +196,21 @@ class AddBookmarkDialog(QDialog):
                 if folder.id == current_folder_id:
                     selected_index = self.folder_combo.count() - 1
                 _add(folder.id, indent + "    ")
-        # Primero la carpeta raíz
+
         self.folder_combo.addItem("📁 Marcadores (raíz)", 1)
         if current_folder_id == 1:
             selected_index = 0
         _add(1)
         self.folder_combo.setCurrentIndex(selected_index)
+
     @property
     def result_title(self) -> str:
         return self.title_edit.text().strip()
+
     @property
     def result_url(self) -> str:
         return self.url_edit.text().strip()
+
     @property
     def result_folder_id(self) -> int:
         return self.folder_combo.currentData() or 1
@@ -253,15 +298,34 @@ class BookmarkPanelWidget(QWidget):
         super().__init__(parent)
         self.bm = bookmark_manager    # instancia de BookmarkManager (maintag.py)
         self.fm = folders_manager     # instancia de FoldersManager
+
+        # Dict domain → [QTreeWidgetItem, ...] pendientes de recibir favicon
+        self._favicon_pending: dict[str, list] = {}
+
         self._build_ui()
         self._apply_dynamic_styles()
         self.reload()
+
+        # Conectar al FaviconManager para actualizar items cuando llegue un favicon
+        if _FAVICON_AVAILABLE:
+            fvm = get_favicon_manager()
+            if fvm:
+                fvm.favicon_ready.connect(self._on_favicon_ready)
 
         # Conectar al ThemeEngine para reaccionar a cambios de tema
         if _THEME_AVAILABLE:
             te = get_theme_engine()
             if te:
                 te.theme_changed.connect(self._on_theme_changed)
+    def _on_favicon_ready(self, domain: str, icon: QIcon) -> None:
+        """Actualiza los QTreeWidgetItem que esperaban el favicon de *domain*."""
+        items = self._favicon_pending.pop(domain, [])
+        for item in items:
+            try:
+                item.setIcon(0, icon)
+            except RuntimeError:
+                pass  # item ya destruido
+
     def _on_theme_changed(self, _theme_name: str) -> None:
         """Actualiza los estilos cuando cambia el tema global."""
         self._apply_dynamic_styles()
@@ -366,11 +430,24 @@ class BookmarkPanelWidget(QWidget):
         # Marcadores
         for bm in node.get("children_bookmarks", []):
             bm_item = QTreeWidgetItem(folder_item)
-            bm_item.setText(0, f"🔖 {bm['title']}")
+            bm_item.setText(0, bm["title"])
             bm_item.setText(1, bm["url"])
             bm_item.setToolTip(1, bm["url"])
             bm_item.setData(0, self._ROLE_ID, bm["id"])
             bm_item.setData(0, self._ROLE_TYPE, "bookmark")
+            # Favicon: inmediato si está en caché, asíncrono si no
+            if _FAVICON_AVAILABLE:
+                fvm = get_favicon_manager()
+                icon = fvm.get(bm["url"]) if fvm else None
+                if icon:
+                    bm_item.setIcon(0, icon)
+                else:
+                    bm_item.setIcon(0, _icon("star"))
+                    domain = _favicon_domain(bm["url"])
+                    if domain and fvm:
+                        self._favicon_pending.setdefault(domain, []).append(bm_item)
+            else:
+                bm_item.setIcon(0, _icon("star"))
     # ── Búsqueda ──────────────────────────────────────────────────────────────
 
     def _on_search(self, text: str):
@@ -390,11 +467,23 @@ class BookmarkPanelWidget(QWidget):
 
         for bm in results:
             item = QTreeWidgetItem(root)
-            item.setText(0, f"🔖 {bm['title']}")
+            item.setText(0, bm["title"])
             item.setText(1, bm["url"])
             item.setToolTip(1, bm["url"])
             item.setData(0, self._ROLE_ID, bm["id"])
             item.setData(0, self._ROLE_TYPE, "bookmark")
+            if _FAVICON_AVAILABLE:
+                fvm = get_favicon_manager()
+                icon = fvm.get(bm["url"]) if fvm else None
+                if icon:
+                    item.setIcon(0, icon)
+                else:
+                    item.setIcon(0, _icon("star"))
+                    domain = _favicon_domain(bm["url"])
+                    if domain and fvm:
+                        self._favicon_pending.setdefault(domain, []).append(item)
+            else:
+                item.setIcon(0, _icon("star"))
         root.setExpanded(True)
         self._tree.resizeColumnToContents(0)
     # ── Acciones sobre carpetas ───────────────────────────────────────────────

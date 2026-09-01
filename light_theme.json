@@ -35,7 +35,11 @@
     "logout_button_pressed": "#820A0A",
     "status_success": "#188038",
     "icon_color": "#5F6368",
-    "glow_accent": "#1A73E8"
+    "glow_accent": "#1A73E8",
+    "url_bar_background": "#F1F3F4",
+    "url_bar_text": "#202124",
+    "url_bar_border": "#DADCE0",
+    "url_bar_placeholder": "#5F6368"
   },
   "fonts": {
     "family": "Segoe UI, Arial, sans-serif",

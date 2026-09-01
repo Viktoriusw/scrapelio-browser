@@ -56,6 +56,15 @@ class UnifiedPluginPanel(BasePanel):
             (self.create_store_tab, "🛒 Tienda"),
             (self.create_management_tab, "⚙️ Gestión"),
         ]
+
+    def _apply_base_theme(self):
+        """Aplicar tema al panel y actualizar widgets con colores dinámicos."""
+        super()._apply_base_theme()
+        c = self.get_theme_colors()
+        if hasattr(self, 'plugin_list') and self.plugin_list:
+            self._apply_list_style(self.plugin_list)
+        if hasattr(self, 'status_label') and self.status_label:
+            self.status_label.setStyleSheet(f"color: {c['text_secondary']}; font-size: 11px;")
     def initial_load(self):
         """Carga inicial de plugins"""
         if not self.plugins_loaded:
@@ -67,6 +76,7 @@ class UnifiedPluginPanel(BasePanel):
 
     def create_store_tab(self):
         """Crear pestaña de tienda de plugins"""
+        c = self.get_theme_colors()
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -92,20 +102,7 @@ class UnifiedPluginPanel(BasePanel):
 
         # Lista de plugins
         self.plugin_list = QListWidget()
-        self.plugin_list.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-                background-color: white;
-            }
-            QListWidget::item {
-                border-bottom: 1px solid #f8f9fa;
-                padding: 5px;
-            }
-            QListWidget::item:selected {
-                background-color: #e3f2fd;
-            }
-        """)
+        self._apply_list_style(self.plugin_list)
         layout.addWidget(self.plugin_list)
 
         # Barra de progreso
@@ -115,21 +112,42 @@ class UnifiedPluginPanel(BasePanel):
 
         # Etiqueta de estado
         self.status_label = QLabel("Cargando plugins...")
-        self.status_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+        self.status_label.setStyleSheet(f"color: {c['text_secondary']}; font-size: 11px;")
         layout.addWidget(self.status_label)
 
         return widget
+
+    def _apply_list_style(self, list_widget: QListWidget) -> None:
+        """Aplica estilo de tema al QListWidget."""
+        c = self.get_theme_colors()
+        list_widget.setStyleSheet(f"""
+            QListWidget {{
+                border: 1px solid {c['border']};
+                border-radius: 4px;
+                background-color: {c['surface_1']};
+                outline: none;
+            }}
+            QListWidget::item {{
+                border-bottom: 1px solid {c['border']};
+                padding: 5px;
+                background-color: transparent;
+            }}
+            QListWidget::item:selected {{
+                background-color: {c['selected']};
+            }}
+        """)
     # ==================== PESTAÑA GESTIÓN ====================
 
     def create_management_tab(self):
-        """Crear pestaña de gestión de plugins SUSCRITOS"""
+        """Crear pestaña de gestión de plugins"""
+        c = self.get_theme_colors()
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
         # Encabezado
         header_layout = QHBoxLayout()
 
-        title_label = QLabel("⚙️ Mis Plugins Suscritos")
+        title_label = QLabel("⚙️ Mis Plugins")
         title_label.setFont(QFont("Arial", 16, QFont.Bold))
         header_layout.addWidget(title_label)
 
@@ -143,10 +161,13 @@ class UnifiedPluginPanel(BasePanel):
 
         # Descripción
         desc_label = QLabel(
-            "Aquí puedes ver, descargar, instalar y desinstalar los plugins a los que estás suscrito."
+            "Plugins instalados localmente. Inicia sesión para ver el estado de tus suscripciones."
         )
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #6c757d; padding: 10px; background-color: #f8f9fa; border-radius: 4px;")
+        desc_label.setStyleSheet(
+            f"color: {c['text_secondary']}; padding: 10px; "
+            f"background-color: {c['surface_1']}; border-radius: 4px;"
+        )
         layout.addWidget(desc_label)
 
         # Tabla de plugins suscritos
@@ -169,38 +190,69 @@ class UnifiedPluginPanel(BasePanel):
 
         return widget
     def refresh_management_tab(self):
-        """Refrescar tabla de gestión con plugins SUSCRITOS"""
+        """Refrescar tabla de gestión con todos los plugins instalados localmente."""
         if not hasattr(self, 'management_table'):
             return
         self.management_table.setRowCount(0)
 
-        # Verificar autenticación
-        if not self.plugin_manager.auth_manager or not self.plugin_manager.auth_manager.auth_state.is_authenticated:
-            self._show_auth_required_message()
-            return
-        # Obtener todos los plugins disponibles
-        try:
-            plugins = self.plugin_manager.load_available_plugins()
+        is_authenticated = (
+            self.plugin_manager.auth_manager is not None
+            and self.plugin_manager.auth_manager.auth_state.is_authenticated
+        )
 
-            if not plugins:
-                self._show_no_subscriptions_message()
-                return
-            # Filtrar solo plugins con suscripción activa
-            subscribed_plugins = []
-            for plugin_info in plugins:
-                access_info = self.plugin_manager.get_plugin_access(plugin_info.id)
-                if access_info.access_level in [PluginAccessLevel.PREMIUM, PluginAccessLevel.TRIAL]:
-                    subscribed_plugins.append((plugin_info, access_info))
-            if not subscribed_plugins:
-                self._show_no_subscriptions_message()
-                return
-            # Agregar cada plugin suscrito a la tabla
-            for plugin_info, access_info in subscribed_plugins:
-                self._add_plugin_to_management_table(plugin_info, access_info)
-        except Exception as e:
-            print(f"[UnifiedPluginPanel] Error al cargar plugins suscritos: {e}")
-            import traceback
-            traceback.print_exc()
+        # Siempre mostrar plugins instalados localmente
+        local_ids = self.plugin_manager.get_installed_plugins()
+
+        if not local_ids:
+            self._show_no_subscriptions_message()
+            return
+
+        for plugin_id in local_ids:
+            plugin_info = self.plugin_manager.get_plugin_info(plugin_id)
+            if plugin_info is None:
+                # Leer plugin_info.json del directorio si existe
+                import json as _json
+                from pathlib import Path as _Path
+                info_file = self.plugin_manager.plugins_dir / plugin_id / "plugin_info.json"
+                _meta: dict = {}
+                if info_file.exists():
+                    try:
+                        _meta = _json.loads(info_file.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+                plugin_info = PluginInfo(
+                    id=plugin_id,
+                    name=_meta.get("name", plugin_id.replace("_", " ").title()),
+                    version=_meta.get("version", "—"),
+                    description=_meta.get("description", "Plugin instalado localmente"),
+                    author=_meta.get("author", "—"),
+                    price=float(_meta.get("price", 0.0)),
+                    category=_meta.get("category", "local"),
+                )
+
+            if is_authenticated:
+                access_info = self.plugin_manager.get_plugin_access(plugin_id)
+            else:
+                access_info = PluginAccessInfo(
+                    plugin_id=plugin_id,
+                    plugin_name=plugin_info.name,
+                    access_level=PluginAccessLevel.FREE,
+                    is_licensed=False,
+                )
+            self._add_plugin_to_management_table(plugin_info, access_info)
+
+        # Si además está autenticado, añadir plugins suscritos no instalados
+        if is_authenticated:
+            try:
+                backend_plugins = self.plugin_manager.load_available_plugins() or []
+                for plugin_info in backend_plugins:
+                    if plugin_info.id in local_ids:
+                        continue
+                    access_info = self.plugin_manager.get_plugin_access(plugin_info.id)
+                    if access_info.access_level in [PluginAccessLevel.PREMIUM, PluginAccessLevel.TRIAL]:
+                        self._add_plugin_to_management_table(plugin_info, access_info)
+            except Exception as e:
+                logger.warning(f"No se pudieron cargar plugins del backend: {e}")
     def _add_plugin_to_management_table(self, plugin_info: PluginInfo, access_info: PluginAccessInfo):
         """Agregar un plugin a la tabla de gestión"""
         row = self.management_table.rowCount()
@@ -436,6 +488,7 @@ class UnifiedPluginPanel(BasePanel):
         self.plugin_list.setItemWidget(item, plugin_widget)
     def create_plugin_widget(self, plugin_info: PluginInfo) -> QWidget:
         """Crear widget para un plugin en la tienda"""
+        c = self.get_theme_colors()
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -448,14 +501,12 @@ class UnifiedPluginPanel(BasePanel):
         container.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
 
         if has_subscription:
-            border_color = "#28a745" if not is_installed else "#17a2b8"
-            bg_color = "#f0fff4" if not is_installed else "#e7f5ff"
+            border_color = c['success'] if not is_installed else c['accent']
         else:
-            border_color = "#dc3545"
-            bg_color = "#fff5f5"
+            border_color = c['error']
         container.setStyleSheet(f"""
             QFrame {{
-                background-color: {bg_color};
+                background-color: {c['surface_1']};
                 border: 2px solid {border_color};
                 border-radius: 12px;
                 padding: 16px;
@@ -489,7 +540,7 @@ class UnifiedPluginPanel(BasePanel):
         # Descripción
         desc_label = QLabel(plugin_info.description)
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #495057; font-size: 12px; padding: 8px 0;")
+        desc_label.setStyleSheet(f"color: {c['text_secondary']}; font-size: 12px; padding: 8px 0;")
         desc_label.setMaximumHeight(50)
         container_layout.addWidget(desc_label)
 
@@ -538,12 +589,16 @@ class UnifiedPluginPanel(BasePanel):
                                f"No se pudo abrir la URL del plugin:\n{str(e)}")
     def create_auth_required_widget(self) -> QWidget:
         """Widget para mostrar que se requiere autenticación"""
+        c = self.get_theme_colors()
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(20, 20, 20, 20)
 
         container = QFrame()
-        container.setStyleSheet("QFrame { background-color: #f8f9fa; border: 2px solid #dee2e6; border-radius: 8px; padding: 10px; }")
+        container.setStyleSheet(
+            f"QFrame {{ background-color: {c['surface_1']}; border: 2px solid {c['border']}; "
+            f"border-radius: 8px; padding: 10px; }}"
+        )
         container_layout = QVBoxLayout(container)
 
         title_label = QLabel("🔐 Autenticación Requerida")
@@ -552,6 +607,7 @@ class UnifiedPluginPanel(BasePanel):
 
         desc_label = QLabel("Para acceder a los plugins disponibles, necesitas iniciar sesión con tu cuenta de usuario.")
         desc_label.setWordWrap(True)
+        desc_label.setStyleSheet(f"color: {c['text_secondary']};")
         container_layout.addWidget(desc_label)
 
         layout.addWidget(container)

@@ -19,10 +19,21 @@ from PySide6.QtWidgets import (
     QComboBox,
     QStackedWidget,
     QListWidget,
+    QSizePolicy,
 )
-from PySide6.QtCore import Qt, QUrl, QSettings, QSize, QTimer, QThread, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QRect,
+    QSettings,
+    QSize,
+    QThread,
+    QTimer,
+    QUrl,
+    Qt,
+    Signal,
+)
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
-from PySide6.QtGui import QIcon, QPalette, QColor, QAction, QCursor
+from PySide6.QtGui import QIcon, QPalette, QColor, QAction, QCursor, QMouseEvent
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from tabs import TabManager
 from navigation import NavigationManager
@@ -56,7 +67,7 @@ import urllib.parse
 # NUEVAS FUNCIONALIDADES UX/UI - Plan de Acción
 # ============================================================================
 from find_in_page import FindInPageBar, FindInPageManager
-from modern_statusbar import ModernStatusBar
+from modern_statusbar import ModernStatusBar, SslIndicatorButton
 from download_panel import DownloadPanel
 from screenshot_tool import ScreenshotTool, ScreenshotDialog
 from profile_manager import ProfileManager, ProfileSwitcher
@@ -256,7 +267,7 @@ except ImportError as e:
 
 # Import unified plugin system
 try:
-    from unified_plugin_manager import UnifiedPluginManager
+    from unified_plugin_manager import UnifiedPluginManager, PluginAccessLevel
     from unified_plugin_panel import UnifiedPluginPanel
 
     PLUGIN_SYSTEM_AVAILABLE = True
@@ -319,15 +330,62 @@ class LoginWorker(QThread):
             self.login_completed.emit(error_result)
 
 
+def _cursor_shape_for_resize_edges(edges: Qt.Edge) -> Qt.CursorShape:
+    """Cursor de tamaño coherente con la combinación de bordes indicada."""
+    le = Qt.Edge.LeftEdge
+    ri = Qt.Edge.RightEdge
+    top = Qt.Edge.TopEdge
+    bot = Qt.Edge.BottomEdge
+    diag_f = (le | top, ri | bot)
+    diag_b = (ri | top, le | bot)
+    if edges in diag_f:
+        return Qt.CursorShape.SizeFDiagCursor
+    if edges in diag_b:
+        return Qt.CursorShape.SizeBDiagCursor
+    if edges == le or edges == ri:
+        return Qt.CursorShape.SizeHorCursor
+    return Qt.CursorShape.SizeVerCursor
+
+
+class _FrameResizeHandle(QWidget):
+    """Zona sensible en el borde para iniciar resize vía compositor (`startSystemResize`)."""
+
+    THICKNESS = 8
+
+    def __init__(self, main_window: QMainWindow, edges: Qt.Edge) -> None:
+        super().__init__(main_window)
+        self._mw = main_window
+        self._edges = edges
+        self.setStyleSheet("background: transparent;")
+        self.setCursor(QCursor(_cursor_shape_for_resize_edges(self._edges)))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 — API Qt
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        wh = self._mw.windowHandle()
+        if wh is None:
+            super().mousePressEvent(event)
+            return
+        try:
+            wh.startSystemResize(self._edges)
+        except Exception:
+            pass
+
+
 class MainWindow(QMainWindow):
     # UI Constants
     BTN_BOX = 36  # button box - tamaño uniforme para todos los botones
     ICON_18 = QSize(14, 14)  # Tamaño estándar de icono
+    FRAMELESS_MIN_W = 720
+    FRAMELESS_MIN_H = 480
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Scrapelio")
         self.setGeometry(100, 100, 1200, 800)
+        self.settings = QSettings("Scrapelio", "Settings")
+        self._window_frameless = False
 
         # VENTANA NORMAL - Comportamiento completo del sistema operativo
         # Sin FramelessWindowHint para mantener TODA la funcionalidad:
@@ -362,7 +420,7 @@ class MainWindow(QMainWindow):
             except Exception as _ex:
                 import logging as _log
                 _log.getLogger(__name__).error("Error iniciando FoldersManager: %s", _ex)
-        self.password_manager = PasswordManager()
+        self.password_manager = PasswordManager(self)
         self.navigation_manager = NavigationManager(self)
         self.tab_manager = TabManager(self.history_manager, self)
         self.navigation_manager.initialize_tab_manager(self.tab_manager)
@@ -506,7 +564,52 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(main_container)
         main_layout.setContentsMargins(0, 0, 0, 0)  # Sin márgenes gruesos
         main_layout.setSpacing(0)  # Sin espaciado
-        main_layout.addWidget(self.nav_bar)
+        self.main_layout = main_layout
+
+        # ── Distribución estilo Firefox (de arriba a abajo) ───────────────────
+        #   Fila 1: tira de pestañas  (barra reparentada desde el QTabWidget)
+        #   Fila 2: barra de navegación (botones + barra de direcciones)
+        #   Fila 3: barra de marcadores/favoritos (se inserta en setup_dock_widgets)
+        # El contenido web va debajo, dentro del content_splitter.
+
+        # Contenedor de la tira de pestañas (fila superior)
+        self.tab_strip_container = QWidget()
+        self.tab_strip_container.setObjectName("tabStripContainer")
+        # Altura fija a su contenido: evita que el contenedor absorba espacio
+        # sobrante y deje la barra de pestañas flotando con huecos.
+        self.tab_strip_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        tab_strip_layout = QHBoxLayout(self.tab_strip_container)
+        tab_strip_layout.setContentsMargins(0, 0, 0, 0)
+        tab_strip_layout.setSpacing(0)
+
+        # Reparentar la barra de pestañas del QTabWidget a la fila superior.
+        # El QTabWidget conserva el contenido (vistas web) dentro del
+        # content_splitter; DetachedTabWidget elimina el hueco que quedaría.
+        _tab_bar = self.tab_manager.tabs.tabBar()
+        # objectName propio: al reparentar la barra fuera del QTabWidget, los
+        # selectores "#browserTabs QTabBar" dejan de alcanzarla (ya no es
+        # descendiente). Con un id propio los temas la estilizan esté donde esté.
+        _tab_bar.setObjectName("browserTabBar")
+        _tab_bar.setExpanding(False)  # pestañas compactas alineadas a la izquierda
+        # Estilo base (no temático) directo sobre la barra como fallback.
+        try:
+            _tab_bar.setStyleSheet(self.modern_styles.get_tab_style())
+        except Exception:
+            pass
+        tab_strip_layout.addWidget(_tab_bar, 1)
+        if hasattr(self.tab_manager.tabs, "set_bar_detached"):
+            self.tab_manager.tabs.set_bar_detached(True)
+
+        # Controles de ventana (min/max/cerrar) a la derecha de la tira de
+        # pestañas — ubicación estilo Firefox. Solo visibles en modo sin marco
+        # (su visibilidad la gobierna _sync_window_chrome_visibility_from_flags).
+        if hasattr(self, "_window_chrome_container") and self._window_chrome_container:
+            tab_strip_layout.addWidget(self._window_chrome_container, 0)
+
+        main_layout.addWidget(self.tab_strip_container)  # Fila 1: pestañas
+        main_layout.addWidget(self.nav_bar)              # Fila 2: navegación
         main_layout.addWidget(self.find_bar)  # Barra de búsqueda (inicialmente oculta)
 
         # Crear splitter horizontal REDIMENSIONABLE pero con barra lateral fija
@@ -603,8 +706,9 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(content_splitter)
         self.setCentralWidget(main_container)
 
-        # Configurar status bar moderna
+        # Status bar oculta — el SSL se muestra en la navbar (SslIndicatorButton)
         self.setStatusBar(self.status_bar)
+        self.status_bar.hide()
 
         # Configurar paneles dock
         self.setup_dock_widgets()
@@ -679,7 +783,15 @@ class MainWindow(QMainWindow):
                     fav_btn.setObjectName("favoriteNavButton")
         except Exception:
             pass
-        # Iniciar en pantalla completa (maximizado)
+
+        # Modo ventana sin marco (persistente): establecer antes del primer show
+        if self.settings.value("ui/frameless_window", False, type=bool):
+            self.setWindowFlags(
+                Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
+            )
+            self._window_frameless = True
+        self._sync_window_chrome_visibility_from_flags()
+
         self.showMaximized()
     def setup_dock_widgets(self):
         # Configurar DevTools
@@ -716,10 +828,25 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "tab_manager") else None
             )
             self.bookmark_panel_widget.data_changed.connect(self._on_bookmarks_data_changed)
-        # Configurar Barra de Favoritos
+        # Configurar Barra de Favoritos (fila 3, debajo de la navegación — estilo Firefox)
         self.favorites_bar = FavoritesBar(self)
-        self.favorites_bar.setAllowedAreas(Qt.TopToolBarArea | Qt.BottomToolBarArea)
-        self.addToolBar(Qt.TopToolBarArea, self.favorites_bar)
+        self.favorites_bar.setMovable(False)
+        self.favorites_bar.setFloatable(False)
+        try:
+            _fav_idx = self.main_layout.indexOf(self.content_splitter)
+            if _fav_idx < 0:
+                _fav_idx = self.main_layout.count()
+            self.main_layout.insertWidget(_fav_idx, self.favorites_bar)
+        except Exception as _fav_ex:
+            import logging as _l
+            _l.getLogger(__name__).warning(
+                "No se pudo insertar favorites_bar en el layout, usando toolbar: %s",
+                _fav_ex,
+            )
+            self.favorites_bar.setAllowedAreas(
+                Qt.TopToolBarArea | Qt.BottomToolBarArea
+            )
+            self.addToolBar(Qt.TopToolBarArea, self.favorites_bar)
         self.favorites_bar.hide()  # Inicialmente oculta
         # Conectar señal de clic en favorito
         self.favorites_bar.favorite_clicked.connect(self.load_url)
@@ -738,6 +865,11 @@ class MainWindow(QMainWindow):
 
         # Conectar señal para aplicar cambios al vuelo
         self.privacy_manager.settings_changed.connect(self.reapply_privacy_to_all_tabs)
+
+        try:
+            self.privacy_manager.sync_default_webengine_profile()
+        except Exception as _sync_ex:
+            print(f"[WARNING] sync_default_webengine_profile: {_sync_ex}")
 
         # Configurar Password Manager
         self.password_dock = QDockWidget("Password Manager", self)
@@ -899,8 +1031,9 @@ class MainWindow(QMainWindow):
         else:
             print("[ERROR] Authentication panel not available")
     def setup_theme(self):
-        # Cargar configuración de tema
-        self.settings = QSettings("Scrapelio", "Settings")
+        # Cargar configuración de tema (Settings ya existe desde __init__)
+        if getattr(self, "settings", None) is None:
+            self.settings = QSettings("Scrapelio", "Settings")
 
         # Configurar sistema de temas modular
         self._setup_theme_system()
@@ -912,10 +1045,19 @@ class MainWindow(QMainWindow):
                 tm.theme_changed.connect(lambda _: self.refresh_all_nav_icons())
                 tm.theme_changed.connect(self._refresh_side_strip_style)
                 tm.theme_changed.connect(self._refresh_navbar_style)
+                tm.theme_changed.connect(self._refresh_tab_bar_style)
+                tm.theme_changed.connect(self._refresh_url_bar_style)
+                # Sin esta conexión, el QToolTip global se queda con el estilo
+                # del arranque cuando el tema se cambia desde el plugin de Temas
+                # (que llama a theme_engine.apply_theme() directamente, sin pasar
+                # por MainWindow.apply_theme()).
+                tm.theme_changed.connect(lambda _: self._apply_tooltip_theme())
                 # Por si el tema ya estaba aplicado antes de crear la barra lateral
                 QTimer.singleShot(0, self._refresh_side_strip_icons)
                 QTimer.singleShot(100, self.refresh_all_nav_icons)
                 QTimer.singleShot(120, self._refresh_side_strip_style)
+                QTimer.singleShot(140, self._refresh_tab_bar_style)
+                QTimer.singleShot(150, self._refresh_url_bar_style)
         # Aplicar estilo inicial al navbar siempre (con o sin ThemeEngine)
         QTimer.singleShot(130, self._refresh_navbar_style)
     def setup_shortcuts(self):
@@ -1060,6 +1202,8 @@ class MainWindow(QMainWindow):
         de la barra de navegación según el espacio disponible.
         """
         super().resizeEvent(event)
+        # Mantener el hueco de la barra de pestañas para los controles de ventana
+        self._sync_tab_strip_widths()
         # Reposicionar botón X global de cierre de panel
         if hasattr(self, "close_panel_btn") and self.close_panel_btn and self.close_panel_btn.isVisible():
             self._position_panel_close_button()
@@ -1080,8 +1224,6 @@ class MainWindow(QMainWindow):
                     self.tab_search.show()
                 if hasattr(self, "url_separator"):
                     self.url_separator.show()
-                if hasattr(self, "profile_switcher"):
-                    self.profile_switcher.show()
                 if hasattr(self, "search_engine_button"):
                     self.search_engine_button.show()
             elif window_width >= WIDTH_MEDIUM:
@@ -1090,18 +1232,14 @@ class MainWindow(QMainWindow):
                     self.tab_search.hide()
                 if hasattr(self, "url_separator"):
                     self.url_separator.hide()
-                if hasattr(self, "profile_switcher"):
-                    self.profile_switcher.show()
                 if hasattr(self, "search_engine_button"):
                     self.search_engine_button.show()
             elif window_width >= WIDTH_SMALL:
-                # ⚠️ ANCHO PEQUEÑO: Ocultar tab_search y profile_switcher
+                # ⚠️ ANCHO PEQUEÑO: Ocultar tab_search
                 if hasattr(self, "tab_search"):
                     self.tab_search.hide()
                 if hasattr(self, "url_separator"):
                     self.url_separator.hide()
-                if hasattr(self, "profile_switcher"):
-                    self.profile_switcher.hide()
                 if hasattr(self, "search_engine_button"):
                     self.search_engine_button.show()
             else:
@@ -1116,6 +1254,10 @@ class MainWindow(QMainWindow):
                     self.search_engine_button.hide()
         except Exception as e:
             print(f"[UI] Error in resizeEvent: {e}")
+        try:
+            self._layout_frameless_resize_handles()
+        except Exception as e_layout:
+            print(f"[UI] Frameless resize layout: {e_layout}")
     def setup_nav_bar(self):
         # Configurar toolbar moderno con constantes uniformes
         self.nav_bar.setIconSize(self.ICON_18)
@@ -1217,19 +1359,21 @@ class MainWindow(QMainWindow):
         self.url_bar.setMinimumWidth(250)
         self.url_bar.setMaximumWidth(600)
 
-        urlbar_style = self.modern_styles.get_urlbar_style()
-        self.url_bar.setStyleSheet(urlbar_style)
-
+        # El estilo del url_bar lo aplica _refresh_url_bar_style() via theme_changed
         if hasattr(self.url_bar, "setClearButtonEnabled"):
-            self.url_bar.setClearButtonEnabled(True)
+            self.url_bar.setClearButtonEnabled(False)
         # Sistema de autocompletado desactivado temporalmente
         self.autocomplete_system = None
+
+        # Indicador SSL — icono candado/advertencia antes de la URL bar
+        self.ssl_indicator = SslIndicatorButton()
+        self.nav_bar.addWidget(self.ssl_indicator)
 
         self.nav_bar.addWidget(self.url_bar)
 
         # Botón de favoritos (entre URL bar y búsqueda de pestañas)
         self.favorite_nav_action = _nav_action(
-            "bookmark", "Guardar pestaña actual en marcadores",
+            "star", "Guardar pestaña actual en marcadores",
             self.show_save_favorite_menu
         )
         self.nav_bar.addAction(self.favorite_nav_action)
@@ -1242,6 +1386,14 @@ class MainWindow(QMainWindow):
         )
         self.nav_bar.addAction(self.toggle_favbar_nav_action)
         self._nav_icon_actions.append(self.toggle_favbar_nav_action)
+
+        # Hueco flexible entre URL/favoritos y controles derechos (alinea zona derecha al borde)
+        self._navbar_trailing_spacer = QWidget()
+        self._navbar_trailing_spacer.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.nav_bar.addWidget(self._navbar_trailing_spacer)
 
         # Separador visual entre URL bar/favoritos y tab search
         self.url_separator = QFrame()
@@ -1264,9 +1416,9 @@ class MainWindow(QMainWindow):
         self.tab_search.textChanged.connect(self.tab_manager.buscar_pestanas)
         self.nav_bar.addWidget(self.tab_search)
 
-        # Profile Switcher - PUEDE OCULTARSE en ventanas pequeñas
+        # Profile Switcher — oculto de la navbar, acceso desde menú hamburguesa
         self.profile_switcher = ProfileSwitcher(self.profile_manager, self)
-        self.nav_bar.addWidget(self.profile_switcher)
+        self.profile_switcher.hide()
 
         # Hamburger Menu Button
         self.menu_btn = QPushButton("☰")
@@ -1282,10 +1434,14 @@ class MainWindow(QMainWindow):
         self.login_btn.setToolTip("Iniciar sesión en Scrapelio")
         self.login_btn.clicked.connect(self.show_login_dialog)
 
-        # Set account icon
-        account_icon = QIcon("icons/account.png")
-        self.login_btn.setIcon(account_icon)
-        self.login_btn.setIconSize(QSize(14, 14))  # Ajustado para coincidir con ICON_18
+        # Icono SVG temático (se re-colorea en refresh_all_nav_icons)
+        try:
+            from ui.core.strip_icons import build_nav_icon as _bni
+            _login_icon = _bni("account", _nav_color, self.ICON_18)
+        except Exception:
+            _login_icon = QIcon("icons/account.svg")
+        self.login_btn.setIcon(_login_icon)
+        self.login_btn.setIconSize(self.ICON_18)
 
         # Los estilos del botón de login se manejan por el tema JSON
         self.login_btn.setProperty("class", "login-button")
@@ -1298,8 +1454,17 @@ class MainWindow(QMainWindow):
         self.user_status_label.hide()
         self.nav_bar.addWidget(self.user_status_label)
 
-        # Botones de control de ventana ELIMINADOS - Usa los controles nativos del sistema
-        # La barra de título del sistema operativo ya incluye minimizar, maximizar y cerrar
+        # Controles tipo “cliente”: solo visibles en modo ventana sin marco (Frameless)
+        self._setup_window_chrome_controls()
+
+        self.nav_bar.installEventFilter(self)
+        # Permitir mover/maximizar la ventana arrastrando el hueco vacío de la
+        # tira de pestañas (estilo Firefox), en modo ventana sin marco.
+        try:
+            self.tab_manager.tabs.tabBar().installEventFilter(self)
+            self.tab_strip_container.installEventFilter(self)
+        except Exception:
+            pass
 
         # ── Botón Nueva Pestaña en la esquina derecha de la barra de pestañas ──
         pass  # botón '+' del tab bar se gestiona en BrowserTabBar (tabs.py)
@@ -1571,17 +1736,6 @@ class MainWindow(QMainWindow):
                                                 colors.get("border", "rgba(255,255,255,0.08)"))
             except Exception:
                 pass
-        # Estilo para el botón de favoritos (siempre rosado — fijo por diseño)
-        favorite_style = """
-        QToolButton#favoriteNavButton {
-            background-color: #ffc0cb;
-            border-radius: 4px;
-        }
-        QToolButton#favoriteNavButton:hover {
-            background-color: #ffb0c0;
-        }
-        """
-
         self.nav_bar.setStyleSheet(f"""
             QToolBar {{
                 background: {toolbar_bg};
@@ -1590,27 +1744,442 @@ class MainWindow(QMainWindow):
                 padding: 0px 8px;
                 border: none;
             }}
-            QToolButton {{
+            QToolButton, QPushButton {{
                 background-color: {btn_bg};
                 border: none;
                 border-radius: 6px;
                 min-width: 32px;
-                max-width: 32px;
+                max-width: 36px;
                 min-height: 32px;
-                max-height: 32px;
+                max-height: 36px;
                 padding: 0px;
                 margin: 0px;
             }}
-            QToolButton:hover {{
+            QToolButton:hover, QPushButton:hover {{
                 background-color: {btn_hover};
             }}
-            QToolButton:pressed {{
+            QToolButton:pressed, QPushButton:pressed {{
                 background-color: {btn_pressed};
             }}
-            QToolButton:disabled {{
+            QToolButton:disabled, QPushButton:disabled {{
                 opacity: 0.35;
             }}
-        """ + favorite_style)
+        """)
+        # La tira de pestañas (con los controles de ventana) usa el mismo fondo
+        # que la barra de navegación. Así los botones min/max/cerrar mantienen el
+        # contraste correcto al cambiar de tema (antes quedaban "invisibles").
+        if hasattr(self, "tab_strip_container") and self.tab_strip_container:
+            try:
+                self.tab_strip_container.setStyleSheet(
+                    f"QWidget#tabStripContainer {{ background: {toolbar_bg}; }}"
+                )
+            except Exception:
+                pass
+        self._refresh_window_chrome_style()
+
+        # Actualizar fondo del indicador SSL para que encaje con la navbar
+        if hasattr(self, "ssl_indicator"):
+            try:
+                self.ssl_indicator.setStyleSheet(
+                    f"background: transparent; border: none;"
+                )
+            except Exception:
+                pass
+
+    def _refresh_url_bar_style(self, theme_id=None):
+        """
+        Aplica el QSS de la barra de URL usando los colores del tema activo.
+        Lee url_bar_background / url_bar_text / url_bar_border del tema
+        (con fallback a surface/primary/border) para que sea editable
+        desde el plugin editor de temas.
+        """
+        if not hasattr(self, "url_bar"):
+            return
+
+        bg      = "#2b2d30"
+        text    = "#e8eaed"
+        border  = "#45484a"
+        ph      = "#9aa0a6"
+        focus   = "#8ab4f8"
+
+        if THEME_SYSTEM_AVAILABLE:
+            try:
+                tm = get_theme_manager()
+                if tm:
+                    colors = tm.get_theme_data().get("colors", {})
+                    bg     = colors.get("url_bar_background",
+                                        colors.get("surface",     bg))
+                    text   = colors.get("url_bar_text",
+                                        colors.get("primary",     text))
+                    border = colors.get("url_bar_border",
+                                        colors.get("border",      border))
+                    ph     = colors.get("url_bar_placeholder",
+                                        colors.get("secondary",   ph))
+                    focus  = colors.get("accent",                  focus)
+            except Exception:
+                pass
+
+        self.url_bar.setStyleSheet(f"""
+            QLineEdit#urlBar, QLineEdit#conversationalNavBar {{
+                background: {bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 13px;
+                selection-background-color: {focus};
+            }}
+            QLineEdit#urlBar:focus, QLineEdit#conversationalNavBar:focus {{
+                border: 1px solid {focus};
+            }}
+            QLineEdit#urlBar::placeholder, QLineEdit#conversationalNavBar::placeholder {{
+                color: {ph};
+            }}
+        """)
+
+    def _setup_window_chrome_controls(self):
+        """Minimizar / maximizar / cerrar incrustados (modo ventana sin marco)."""
+        chrome = QWidget()
+        chrome.setObjectName("windowChrome")
+        chrome.setMinimumHeight(36)
+        # Tamaño fijo: impide que el contenedor se expanda dentro del QHBoxLayout
+        # de la tira de pestañas (evita que los botones se separen al maximizar).
+        chrome.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        lay = QHBoxLayout(chrome)
+        lay.setContentsMargins(0, 2, 2, 2)
+        lay.setSpacing(0)
+
+        def _mk(txt: str, tip: str, slot, name: str) -> QPushButton:
+            b = QPushButton(txt)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.setToolTip(tip)
+            b.setFixedSize(40, 32)
+            b.setObjectName(name)
+            b.clicked.connect(slot)
+            return b
+
+        self._chrome_min_btn = _mk("\u2212", "Minimizar", self._chrome_minimize, "chromeMin")
+        self._chrome_max_btn = _mk(
+            "\u25a1", "Maximizar o restaurar", self._chrome_toggle_maximize, "chromeMax"
+        )
+        self._chrome_close_btn = _mk("\u2715", "Cerrar", self._chrome_close_window, "chromeClose")
+        lay.addWidget(self._chrome_min_btn)
+        lay.addWidget(self._chrome_max_btn)
+        lay.addWidget(self._chrome_close_btn)
+
+        self._window_chrome_container = chrome
+        # Nota: el contenedor se inserta en la fila de pestañas (arriba a la
+        # derecha, estilo Firefox) al construir el layout principal, no aquí.
+        chrome.hide()
+        self._chrome_update_max_glyph()
+
+    def _refresh_window_chrome_style(self):
+        """Alinear estilo de botones de ventana con la barra de navegación."""
+        if not hasattr(self, "_chrome_min_btn"):
+            return
+        btn_bg = "transparent"
+        btn_hover = "rgba(255,255,255,0.12)"
+        close_hover = "#c42b1c"
+        fg = "rgba(255,255,255,0.9)"
+        if THEME_SYSTEM_AVAILABLE:
+            try:
+                tm = get_theme_manager()
+                if tm:
+                    colors = tm.get_theme_data().get("colors", {})
+                    btn_hover = colors.get(
+                        "navbar_button_hover",
+                        colors.get("hover", btn_hover),
+                    )
+                    fg = colors.get(
+                        "navbar_text",
+                        colors.get("text_primary", fg),
+                    )
+            except Exception:
+                pass
+        qss = f"""
+            QWidget#windowChrome QPushButton#chromeMin,
+            QWidget#windowChrome QPushButton#chromeMax,
+            QWidget#windowChrome QPushButton#chromeClose {{
+                background: {btn_bg};
+                border: none;
+                color: {fg};
+                font-size: 16px;
+                font-weight: bold;
+                border-radius: 4px;
+            }}
+            QWidget#windowChrome QPushButton#chromeMin:hover,
+            QWidget#windowChrome QPushButton#chromeMax:hover {{
+                background: {btn_hover};
+            }}
+            QWidget#windowChrome QPushButton#chromeClose:hover {{
+                background: {close_hover};
+                color: #ffffff;
+            }}
+        """
+        self._window_chrome_container.setStyleSheet(qss)
+
+    def _chrome_minimize(self):
+        self.showMinimized()
+
+    def _chrome_toggle_maximize(self):
+        self.toggle_maximize()
+
+    def _chrome_close_window(self):
+        self.close()
+
+    def _chrome_update_max_glyph(self):
+        if not hasattr(self, "_chrome_max_btn"):
+            return
+        try:
+            # □ maximizar · ▪ restaurar (símbolos Unicode bien soportados)
+            self._chrome_max_btn.setText("\u25aa" if self.isMaximized() else "\u25a1")
+        except Exception:
+            self._chrome_max_btn.setText("□")
+
+    def _sync_window_chrome_visibility_from_flags(self):
+        if not hasattr(self, "_window_chrome_container"):
+            return
+        frameless = bool(self.windowFlags() & Qt.WindowType.FramelessWindowHint)
+        self._window_frameless = frameless
+        self._window_chrome_container.setVisible(frameless)
+        self._apply_frameless_window_size_policy()
+        self._ensure_frameless_resize_handles()
+        self._layout_frameless_resize_handles()
+        self._sync_frameless_resize_handles_visibility()
+        self._sync_tab_strip_widths()
+        QTimer.singleShot(0, self._chrome_update_max_glyph)
+        QTimer.singleShot(0, self._sync_tab_strip_widths)
+
+    def _sync_tab_strip_widths(self):
+        """
+        Acota el ancho máximo de la barra de pestañas para dejar hueco a los
+        controles de ventana (estilo Firefox). QTabWidget reposiciona su barra
+        (aunque esté reparentada) al ancho del contenido; ese setGeometry queda
+        limitado por el maximumWidth, evitando que las pestañas se solapen con
+        los botones de minimizar/maximizar/cerrar.
+        """
+        if not hasattr(self, "tab_strip_container") or not hasattr(self, "tab_manager"):
+            return
+        try:
+            bar = self.tab_manager.tabs.tabBar()
+            cont_w = self.tab_strip_container.width()
+            chrome_w = 0
+            ch = getattr(self, "_window_chrome_container", None)
+            if ch is not None and ch.isVisible():
+                # Usar SOLO el sizeHint (estable). Usar ch.width() creaba un
+                # bucle de realimentación que inflaba el contenedor del chrome.
+                chrome_w = ch.sizeHint().width()
+            avail = cont_w - chrome_w
+            if avail > 0:
+                bar.setMaximumWidth(avail)
+        except Exception:
+            pass
+
+    def _frameless_top_reserve_y(self) -> int:
+        """
+        Desplazamiento vertical del borde redimensionable superior.
+
+        En el layout estilo Firefox la tira de pestañas está en el borde real
+        de la ventana, por lo que el redimensionado superior debe situarse en
+        y=0 (esquinas y banda superior sobre el borde físico de la ventana).
+        """
+        return 0
+
+    def _ensure_frameless_resize_handles(self) -> None:
+        if getattr(self, "_frameless_resize_handles_created", False):
+            return
+        le = Qt.Edge.LeftEdge
+        ri = Qt.Edge.RightEdge
+        top = Qt.Edge.TopEdge
+        bot = Qt.Edge.BottomEdge
+        edge_specs = (
+            le,
+            ri,
+            top,
+            bot,
+            le | top,
+            ri | top,
+            le | bot,
+            ri | bot,
+        )
+        self._frameless_resize_handles = [_FrameResizeHandle(self, e) for e in edge_specs]
+        self._frameless_resize_handles_created = True
+        for h in self._frameless_resize_handles:
+            h.hide()
+
+    def _layout_frameless_resize_handles(self) -> None:
+        """Coloca bands de píxeles sobre bordes y esquinas (transparentes)."""
+        if not getattr(self, "_frameless_resize_handles_created", False):
+            return
+        handles = getattr(self, "_frameless_resize_handles", None)
+        if not handles:
+            return
+        t = _FrameResizeHandle.THICKNESS
+        w_win = max(self.width(), t * 4)
+        h_win = max(self.height(), t * 4)
+        top_y = self._frameless_top_reserve_y()
+        if top_y > h_win - 3 * t:
+            top_y = max(0, h_win - 3 * t)
+        ih = max(0, h_win - top_y - 2 * t)
+        iw = max(0, w_win - 2 * t)
+        rects = [
+            QRect(0, top_y + t, t, ih),
+            QRect(w_win - t, top_y + t, t, ih),
+            QRect(t, top_y, iw, t),
+            QRect(t, h_win - t, iw, t),
+            QRect(0, top_y, t, t),
+            QRect(w_win - t, top_y, t, t),
+            QRect(0, h_win - t, t, t),
+            QRect(w_win - t, h_win - t, t, t),
+        ]
+        for gh, rr in zip(handles, rects):
+            gh.setGeometry(rr)
+            gh.raise_()
+
+    def _sync_frameless_resize_handles_visibility(self) -> None:
+        if not getattr(self, "_frameless_resize_handles_created", False):
+            return
+        show_it = (
+            getattr(self, "_window_frameless", False)
+            and not self.isMaximized()
+            and not self.isFullScreen()
+        )
+        for gh in getattr(self, "_frameless_resize_handles", ()):
+            gh.setVisible(show_it)
+
+    def _apply_frameless_window_size_policy(self) -> None:
+        if getattr(self, "_window_frameless", False):
+            self.setMinimumSize(self.FRAMELESS_MIN_W, self.FRAMELESS_MIN_H)
+        else:
+            self.setMinimumSize(0, 0)
+
+    def _set_frameless_window(self, enabled: bool, *, persist: bool = True) -> None:
+        """Activa/desactiva ventana sin decoración del SO; controles en la navbar."""
+        if persist:
+            self.settings.setValue("ui/frameless_window", enabled)
+            self.settings.sync()
+
+        geom = self.frameGeometry()
+        was_visible = self.isVisible()
+        was_max = self.isMaximized()
+
+        flags = Qt.WindowType.Window
+        if enabled:
+            flags |= Qt.WindowType.FramelessWindowHint
+        self.setWindowFlags(flags)
+        self._window_frameless = enabled
+
+        if was_visible:
+            if was_max:
+                self.showMaximized()
+            else:
+                self.showNormal()
+                if geom.isValid():
+                    if enabled:
+                        try:
+                            self.move(geom.topLeft())
+                            self.resize(
+                                max(int(geom.width()), self.FRAMELESS_MIN_W),
+                                max(int(geom.height()), self.FRAMELESS_MIN_H),
+                            )
+                        except Exception:
+                            self.resize(self.FRAMELESS_MIN_W, self.FRAMELESS_MIN_H)
+                    else:
+                        self.setGeometry(geom)
+                self.show()
+        else:
+            self.show()
+
+        self._sync_window_chrome_visibility_from_flags()
+
+        fs_chk = getattr(self, "_frameless_settings_check", None)
+        if fs_chk is not None:
+            try:
+                fs_chk.blockSignals(True)
+                fs_chk.setChecked(enabled)
+            except RuntimeError:
+                self._frameless_settings_check = None
+            finally:
+                try:
+                    fs_chk.blockSignals(False)
+                except RuntimeError:
+                    pass
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange:
+            QTimer.singleShot(0, self._chrome_update_max_glyph)
+            QTimer.singleShot(0, self._sync_frameless_resize_handles_visibility)
+            QTimer.singleShot(0, self._layout_frameless_resize_handles)
+            QTimer.singleShot(0, self._sync_tab_strip_widths)
+        super().changeEvent(event)
+
+    def eventFilter(self, obj, event):  # noqa: N802 — API Qt
+        # Arrastre / doble-clic-maximizar desde el hueco vacío de la tira de
+        # pestañas (barra de pestañas o su contenedor), solo en modo sin marco.
+        if getattr(self, "_window_frameless", False) and isinstance(event, QMouseEvent):
+            tab_bar = None
+            try:
+                tab_bar = self.tab_manager.tabs.tabBar()
+            except Exception:
+                tab_bar = None
+            strip = getattr(self, "tab_strip_container", None)
+            if obj is tab_bar or obj is strip:
+                et = event.type()
+                pos_pt = (
+                    event.position().toPoint()
+                    if hasattr(event, "position")
+                    else event.pos()
+                )
+                # En la barra de pestañas solo el área SIN pestaña es "agarrable".
+                on_empty = True
+                if obj is tab_bar and tab_bar is not None:
+                    on_empty = tab_bar.tabAt(pos_pt) == -1
+                if on_empty and event.button() == Qt.MouseButton.LeftButton:
+                    try:
+                        wh = self.windowHandle()
+                        if wh is not None:
+                            if et == QEvent.Type.MouseButtonDblClick:
+                                self.toggle_maximize()
+                                return True
+                            if et == QEvent.Type.MouseButtonPress:
+                                wh.startSystemMove()
+                                return True
+                    except Exception:
+                        pass
+
+        if (
+            getattr(self, "_window_frameless", False)
+            and obj is getattr(self, "nav_bar", None)
+        ):
+            et = event.type()
+            spacer = getattr(self, "_navbar_trailing_spacer", None)
+            try:
+                wh = self.windowHandle()
+                if wh is None:
+                    raise RuntimeError("sin windowHandle")
+                if isinstance(event, QMouseEvent):
+                    pos_pt = (
+                        event.position().toPoint()
+                        if hasattr(event, "position")
+                        else event.pos()
+                    )
+                    cw = self.nav_bar.childAt(pos_pt)
+                    drag_zone = spacer is not None and cw is spacer
+                    if et == QEvent.Type.MouseButtonDblClick and drag_zone:
+                        if event.button() == Qt.MouseButton.LeftButton:
+                            self.toggle_maximize()
+                            return False
+                    if et == QEvent.Type.MouseButtonPress and drag_zone:
+                        if event.button() == Qt.MouseButton.LeftButton:
+                            try:
+                                wh.startSystemMove()
+                            except Exception:
+                                pass
+                            return False
+            except Exception:
+                pass
+        return False
+
     def _on_theme_changed(self, theme_id: str):
         """Callback cuando cambia el tema — actualiza iconos, hover y ajustes."""
         self.settings.setValue("theme", theme_id)
@@ -1618,6 +2187,139 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(50, self.refresh_all_nav_icons)
         QTimer.singleShot(60, self._refresh_side_strip_style)
         QTimer.singleShot(65, self._refresh_navbar_style)
+        QTimer.singleShot(70, self._refresh_tab_bar_style)
+        QTimer.singleShot(75, self._refresh_url_bar_style)
+
+    def _refresh_tab_bar_style(self, theme_id=None):
+        """
+        Reaplica el QSS del tab bar (pestañas de navegación) usando los colores
+        del ThemeEngine activo.
+
+        El tab bar tiene su propio setStyleSheet() local que toma precedencia sobre
+        app.setStyleSheet(). Sin este método, el tab bar ignora los cambios de tema.
+        """
+        if not hasattr(self, "tab_manager") or not self.tab_manager:
+            return
+        tab_bg    = "#2B2D30"
+        tab_sel   = "#3C3F41"
+        tab_hover = "#45484A"
+        tab_text  = "#BBBBBB"
+        tab_text_sel = "#E8EAED"
+        strip_bg  = "transparent"
+        close_hover = "rgba(255,255,255,0.16)"
+
+        if THEME_SYSTEM_AVAILABLE:
+            try:
+                tm = get_theme_manager()
+                if tm:
+                    colors = tm.get_theme_data().get("colors", {})
+                    tab_bg       = colors.get("tab_background",  colors.get("surface",     tab_bg))
+                    tab_sel      = colors.get("tab_selected",    colors.get("surface",     tab_sel))
+                    tab_hover    = colors.get("tab_hover",       colors.get("hover",       tab_hover))
+                    tab_text     = colors.get("secondary",       tab_text)
+                    tab_text_sel = colors.get("primary",         tab_text_sel)
+                    strip_bg     = colors.get("toolbar_background",
+                                             colors.get("background", strip_bg))
+                    close_hover  = colors.get("tab_close_hover", close_hover)
+            except Exception:
+                pass
+
+        tab_bar_qss = f"""
+            QTabBar {{
+                background-color: transparent;
+            }}
+            QTabBar::tab {{
+                background-color: {tab_bg};
+                color: {tab_text};
+                border: none;
+                padding: 5px 12px;
+                margin-right: 4px;
+                margin-top: 4px;
+                border-radius: 8px;
+                min-width: 160px;
+                max-width: 240px;
+                height: 26px;
+                font-size: 12px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {tab_sel};
+                color: {tab_text_sel};
+                margin-top: 2px;
+                height: 28px;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {tab_hover};
+            }}
+        """
+
+        tab_widget_qss = f"""
+            QTabWidget::pane {{
+                background-color: transparent;
+                border: none;
+            }}
+            QTabBar::tab {{
+                background-color: {tab_bg};
+                color: {tab_text};
+                border: none;
+                padding: 5px 12px;
+                margin-right: 4px;
+                margin-top: 4px;
+                border-radius: 8px;
+                min-width: 160px;
+                max-width: 240px;
+                height: 26px;
+                font-size: 12px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {tab_sel};
+                color: {tab_text_sel};
+                margin-top: 2px;
+                height: 28px;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {tab_hover};
+            }}
+        """
+
+        try:
+            from PySide6.QtWidgets import QToolButton
+            tab_bar = self.tab_manager.tabs.tabBar()
+            tab_bar.setStyleSheet(tab_bar_qss)
+            self.tab_manager.tabs.setStyleSheet(tab_widget_qss)
+            # Actualizar colores de los botones de cierre existentes con el color del tema.
+            # Los botones son QToolButton instalados via setTabButton() en BrowserTabBar.
+            _btn_qss = f"""
+                QToolButton {{
+                    color: {tab_text};
+                    background: transparent;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 13px;
+                    font-weight: 400;
+                    padding: 0px;
+                }}
+                QToolButton:hover {{
+                    color: {tab_text_sel};
+                    background: {close_hover};
+                }}
+                QToolButton:pressed {{
+                    background: {tab_hover};
+                }}
+            """
+            from PySide6.QtWidgets import QWidget
+            for i in range(tab_bar.count()):
+                widget = tab_bar.tabButton(i, tab_bar.RightSide)
+                if isinstance(widget, QToolButton):
+                    widget.setFixedSize(18, 18)
+                    widget.setStyleSheet(_btn_qss)
+                elif isinstance(widget, QWidget):
+                    btn = widget.findChild(QToolButton)
+                    if btn:
+                        btn.setFixedSize(18, 18)
+                        btn.setStyleSheet(_btn_qss)
+        except Exception as e:
+            print(f"[THEME] Error actualizando estilo del tab bar: {e}")
+
     def _refresh_side_strip_icons(self, theme_id=None):
         """Vuelve a tiñar iconos SVG/PNG de la barra lateral según icon_color del tema."""
         if not THEME_SYSTEM_AVAILABLE or not hasattr(self, "side_strip"):
@@ -1667,6 +2369,7 @@ class MainWindow(QMainWindow):
     def load_theme(self):
         """Carga el tema guardado o usa el tema por defecto"""
         self._load_legacy_theme()
+        self._apply_tooltip_theme()
     def apply_theme(self, theme):
         """Aplica el tema especificado usando el theme manager"""
         print(f"[THEME] Applying theme: {theme}")
@@ -1674,16 +2377,65 @@ class MainWindow(QMainWindow):
             theme_manager = get_theme_manager()
             if theme_manager:
                 theme_manager.apply_theme(theme)
+                self._apply_tooltip_theme(theme_manager)
             else:
                 print("[ERROR] Theme manager not available")
         else:
             print("[ERROR] Theme system not available")
+    def _apply_tooltip_theme(self, theme_manager=None):
+        """Aplica el estilo de QToolTip según el tema activo"""
+        try:
+            if theme_manager is None and THEME_SYSTEM_AVAILABLE:
+                theme_manager = get_theme_manager()
+            if not theme_manager:
+                return
+            c = theme_manager.get_theme_data().get("colors", {})
+            bg = c.get("surface", "#3C3F41")
+            text = c.get("primary", "#E8EAED")
+            border = c.get("border", "#5F6368")
+            # QToolTip no tiene setStyleSheet() estático en PySide6 (solo
+            # setFont/setPalette, sin soporte de border-radius/padding).
+            # Para estilizar tooltips con QSS hay que inyectar la regla en
+            # el stylesheet de QApplication, ya que el popup del tooltip no
+            # hereda el stylesheet del widget que lo muestra.
+            import re
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is None:
+                return
+            # ThemeEngine.apply_theme() ya hace app.setStyleSheet(css_completo)
+            # justo antes de emitir theme_changed. Si aquí usáramos setStyleSheet()
+            # a secas, sobrescribiríamos ese CSS completo y solo dejaríamos la
+            # regla de QToolTip. Por eso quitamos cualquier QToolTip previo que
+            # hayamos inyectado nosotros y AÑADIMOS el nuevo al final del CSS
+            # existente, en vez de remplazarlo.
+            #
+            # IMPORTANTE: _generate_complete_css() define "* { color: ... !important; }"
+            # y "QWidget { background-color: ...; color: ...; !important; }". El popup del
+            # QToolTip también es un QWidget, así que sin !important aquí esas reglas
+            # universales siempre ganan y el tooltip se queda con el estilo nativo del
+            # sistema (fondo amarillo, texto sin contraste). Por eso forzamos !important
+            # también en nuestra regla.
+            existing_css = re.sub(r'QToolTip\s*\{[^}]*\}', '', app.styleSheet(), flags=re.DOTALL)
+            app.setStyleSheet(existing_css + f"""
+                QToolTip {{
+                    background-color: {bg} !important;
+                    color: {text} !important;
+                    border: 1px solid {border} !important;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                }}
+            """)
+        except Exception as e:
+            print(f"[THEME] Error actualizando estilo de tooltip: {e}")
     def toggle_theme(self):
         """Alterna entre tema claro y oscuro usando el theme manager"""
         if THEME_SYSTEM_AVAILABLE:
             theme_manager = get_theme_manager()
             if theme_manager:
                 theme_manager.toggle_theme()
+                self._apply_tooltip_theme(theme_manager)
                 print(f"[THEME] Theme toggled to: {theme_manager.get_current_theme()}")
             else:
                 print("[ERROR] Theme manager not available")
@@ -1772,7 +2524,7 @@ class MainWindow(QMainWindow):
         import os
 
         path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "icons", "close.png")
+            os.path.join(os.path.dirname(__file__), "icons", "tab_close.svg")
         )
         path = path.replace("\\", "/")  # Qt QSS necesita / incluso en Windows
         return f"""
@@ -1784,8 +2536,8 @@ class MainWindow(QMainWindow):
             margin-left: 6px;
         }}
         QTabBar::close-button:hover {{
-            background: rgba(0,0,0,0.12);
-            border-radius: 8px;
+            background: rgba(255,255,255,0.16);
+            border-radius: 9px;
         }}
         """
     def toggle_bookmark_manager(self):
@@ -1950,6 +2702,12 @@ class MainWindow(QMainWindow):
                 tab_bar = self.tab_manager.tabs.tabBar()
                 if hasattr(tab_bar, "refresh_icon"):
                     tab_bar.refresh_icon(color)
+            # ── Login button ───────────────────────────────────────────────────
+            if hasattr(self, "login_btn"):
+                _login_ico = build_nav_icon("account", color, self.ICON_18)
+                if not _login_ico.isNull():
+                    self.login_btn.setIcon(_login_ico)
+                    self.login_btn.setIconSize(self.ICON_18)
             print(f"[OK] Nav icons refreshed with color {color}")
         except Exception as e:
             print(f"[WARNING] Error refreshing nav icons: {e}")
@@ -2256,24 +3014,22 @@ class MainWindow(QMainWindow):
             and self.plugin_manager.is_plugin_installed("scraping")
         )
 
-        # Si el plugin está disponible pero el panel no existe, intentar cargarlo dinámicamente
+        # Si el plugin está disponible pero el panel no existe, reutilizar el pipeline
+        # real de carga dinámica (on_plugin_loaded -> _load_scraping_plugin_dynamic)
+        # en vez de reconstruir el panel a mano aquí (antes se pasaba `self` como
+        # scraping_integration por error, y el kwarg plugin_validator no existía).
         if plugin_available and (
             not hasattr(self, "scraping_panel") or not self.scraping_panel
         ):
             try:
-                # Intentar cargar el panel dinámicamente desde el plugin instalado
-                import sys
-                from pathlib import Path
-
-                plugin_path = Path("plugins/scraping")
-                if plugin_path.exists() and str(plugin_path) not in sys.path:
-                    sys.path.insert(0, str(plugin_path))
-                from scraping_panel import ScrapingPanel  # type: ignore[import-not-found]
-
-                self.scraping_panel = ScrapingPanel(
-                    self, plugin_validator=self.plugin_manager
-                )
-                self.advanced_panel_stack.addWidget(self.scraping_panel)
+                if self.plugin_manager and "scraping" not in self.plugin_manager.plugins:
+                    self.plugin_manager.load_plugin("scraping")
+                if self.plugin_manager and "scraping" in self.plugin_manager.plugins:
+                    self.on_plugin_loaded("scraping")
+                if not hasattr(self, "scraping_panel") or not self.scraping_panel:
+                    plugin_available = False
+                elif self.advanced_panel_stack.indexOf(self.scraping_panel) < 0:
+                    self.advanced_panel_stack.addWidget(self.scraping_panel)
                 print("[OK] Scraping panel loaded dynamically")
             except Exception as e:
                 print(f"[ERROR] Failed to load scraping panel dynamically: {e}")
@@ -2422,6 +3178,28 @@ class MainWindow(QMainWindow):
             )
     def toggle_chat_panel(self):
         """Toggle AI chat panel visibility USING FIXED STACK"""
+        # Gate de suscripción: el Asistente de IA requiere login + licencia
+        # (antes se abría sin ninguna verificación, ni siquiera de sesión iniciada).
+        if not self.auth_manager or not self.auth_manager.auth_state.is_authenticated:
+            QMessageBox.information(
+                self,
+                "Asistente de IA",
+                "Debes iniciar sesión para usar el Asistente de IA.",
+            )
+            return
+        if self.plugin_manager:
+            try:
+                access_info = self.plugin_manager.get_plugin_access("ai_assistant")
+                if access_info.access_level.value == "free":
+                    QMessageBox.information(
+                        self,
+                        "Asistente de IA",
+                        "El Asistente de IA es una función premium.\n"
+                        "Necesitas una suscripción activa (o iniciar tu prueba gratuita) para usarlo.",
+                    )
+                    return
+            except Exception as e:
+                print(f"[WARNING] No se pudo verificar la licencia del Asistente de IA: {e}")
         # Lazy-load del panel para evitar que desaparezca el botón si hubo fallo temporal al importar
         if (not hasattr(self, "chat_panel")) or self.chat_panel is None:
             try:
@@ -3013,6 +3791,10 @@ class MainWindow(QMainWindow):
                 print(f"Errors in {failed_applications} tabs")
             if needs_reload:
                 print("Tabs with content reloaded to apply network filters")
+            try:
+                self.privacy_manager.sync_default_webengine_profile()
+            except Exception as sync_err:
+                print(f"[WARNING] sync_default_webengine_profile: {sync_err}")
         except Exception as e:
             print(f"Critical error reapplying privacy settings: {e}")
             import traceback
@@ -3200,8 +3982,18 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
 
         # === Sección 6: Configuración y ayuda ===
-        settings_action = menu.addAction("Ajustes")
-        settings_action.triggered.connect(self.show_settings)
+        settings_menu = menu.addMenu("Ajustes")
+        prefs_action = settings_menu.addAction("Preferencias…")
+        prefs_action.triggered.connect(self.show_settings)
+        settings_menu.addSeparator()
+        ff_action = settings_menu.addAction("Ventana sin marco del sistema")
+        ff_action.setCheckable(True)
+        ff_action.setChecked(
+            bool(self.windowFlags() & Qt.WindowType.FramelessWindowHint)
+        )
+        ff_action.triggered.connect(
+            lambda c: self._set_frameless_window(bool(c), persist=True)
+        )
 
         help_menu = menu.addMenu("Ayuda")
         help_menu.addAction("Acerca de Scrapelio").triggered.connect(self.show_about)
@@ -3214,13 +4006,74 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
 
-        # === Sección 7: Salir ===
+        # === Sección 7: Perfiles de usuario ===
+        profiles_menu = menu.addMenu("Perfiles")
+        try:
+            if hasattr(self, "profile_manager") and self.profile_manager:
+                profiles     = self.profile_manager.get_all_profiles()
+                current_id   = self.profile_manager.current_profile_id
+
+                for profile in profiles:
+                    pid   = profile["id"]
+                    icon  = profile.get("icon", "👤")
+                    name  = profile.get("name", pid)
+                    label = f"{icon}  {name}" + ("  ✓" if pid == current_id else "")
+                    act   = profiles_menu.addAction(label)
+                    act.triggered.connect(
+                        lambda checked=False, p=pid: self._switch_profile_from_menu(p)
+                    )
+
+                profiles_menu.addSeparator()
+                profiles_menu.addAction("Nuevo perfil…").triggered.connect(
+                    self._create_profile_from_menu
+                )
+                profiles_menu.addAction("Gestionar perfiles…").triggered.connect(
+                    self._manage_profiles_from_menu
+                )
+            else:
+                profiles_menu.addAction("Gestor de perfiles no disponible").setEnabled(False)
+        except Exception as e:
+            profiles_menu.addAction(f"Error: {e}").setEnabled(False)
+
+        menu.addSeparator()
+
+        # === Sección 8: Salir ===
         exit_action = menu.addAction("Salir")
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
 
         # Mostrar el menú justo debajo del botón
         menu.exec(self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomLeft()))
+
+    def _switch_profile_from_menu(self, profile_id: str):
+        """Cambia al perfil indicado desde el menú hamburguesa."""
+        try:
+            if hasattr(self, "profile_manager") and self.profile_manager:
+                self.profile_manager.switch_profile(profile_id)
+                if hasattr(self, "profile_switcher"):
+                    self.profile_switcher.update_current_profile()
+        except Exception as e:
+            print(f"[PROFILE] Error switching profile: {e}")
+
+    def _create_profile_from_menu(self):
+        """Abre el diálogo de creación de perfil."""
+        try:
+            from profile_manager import ProfileDialog
+            dialog = ProfileDialog(None, self.profile_manager, self)
+            if dialog.exec():
+                if hasattr(self, "profile_switcher"):
+                    self.profile_switcher.update_current_profile()
+        except Exception as e:
+            print(f"[PROFILE] Error opening profile dialog: {e}")
+
+    def _manage_profiles_from_menu(self):
+        """Abre el gestor completo de perfiles (ProfileSwitcher como diálogo)."""
+        try:
+            if hasattr(self, "profile_switcher"):
+                self.profile_switcher.show_profile_menu()
+        except Exception as e:
+            print(f"[PROFILE] Error opening profile manager: {e}")
+
     def show_login_dialog(self):
         """Mostrar diálogo de login"""
         if not self.auth_manager:
@@ -3407,20 +4260,36 @@ class MainWindow(QMainWindow):
             registration_url = get_registration_url()
         except ImportError:
             # Fallback si no existe network_config.py
-            registration_url = "http://192.168.1.174:4321/auth/registro.html"
+            registration_url = "https://scrapelio.com/auth/registro.html"
         self.tab_manager.add_new_tab(registration_url)
+    def _plugin_has_subscription(self, plugin_id: str) -> bool:
+        """Comprobar si la cuenta autenticada tiene licencia o trial activo
+        para un plugin concreto (no solo si hay sesión iniciada)."""
+        if not hasattr(self, "plugin_manager") or not self.plugin_manager:
+            return False
+        try:
+            access_info = self.plugin_manager.get_plugin_access(plugin_id)
+            return access_info.access_level in (
+                PluginAccessLevel.PREMIUM,
+                PluginAccessLevel.TRIAL,
+            )
+        except Exception as e:
+            print(f"[AUTH] Error checking subscription for {plugin_id}: {e}")
+            return False
     def enable_premium_plugins(self):
         """Habilitar plugins premium cuando el usuario se autentica"""
         if not self.auth_manager or not self.auth_manager.auth_state.is_authenticated:
             return
-        # Habilitar panel de scraping
+        # Habilitar panel de scraping solo si la cuenta tiene licencia/trial de "scraping"
         if hasattr(self, "scraping_panel") and self.scraping_panel:
-            self.scraping_panel.setEnabled(True)
-            print("[AUTH] Scraping panel enabled")
-        # Habilitar panel de proxy
+            authorized = self._plugin_has_subscription("scraping")
+            self.scraping_panel.setEnabled(authorized)
+            print(f"[AUTH] Scraping panel {'enabled' if authorized else 'kept disabled (no subscription)'}")
+        # Habilitar panel de proxy solo si la cuenta tiene licencia/trial de "proxy"
         if hasattr(self, "proxy_panel") and self.proxy_panel:
-            self.proxy_panel.setEnabled(True)
-            print("[AUTH] Proxy panel enabled")
+            authorized = self._plugin_has_subscription("proxy")
+            self.proxy_panel.setEnabled(authorized)
+            print(f"[AUTH] Proxy panel {'enabled' if authorized else 'kept disabled (no subscription)'}")
         # Cargar plugins instalados dinámicamente
         if hasattr(self, "plugin_manager") and self.plugin_manager:
             print("[AUTH] Loading installed plugins...")
@@ -3515,6 +4384,7 @@ class MainWindow(QMainWindow):
                 theme_manager = get_theme_manager()
                 if theme_manager:
                     theme_manager.apply_theme("light")
+                    self._apply_tooltip_theme(theme_manager)
                     print("[OK] Light theme applied via theme manager")
                 else:
                     print("[ERROR] Theme manager not available")
@@ -3529,6 +4399,7 @@ class MainWindow(QMainWindow):
                 theme_manager = get_theme_manager()
                 if theme_manager:
                     theme_manager.apply_theme("dark")
+                    self._apply_tooltip_theme(theme_manager)
                     print("[OK] Dark theme applied via theme manager")
                 else:
                     print("[ERROR] Theme manager not available")
@@ -3620,7 +4491,11 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             return False
     def _load_free_plugins(self):
-        """Cargar plugins gratuitos automáticamente sin necesidad de autenticación"""
+        """Cargar plugins gratuitos automáticamente sin necesidad de autenticación.
+
+        También descubre automáticamente nuevos plugins gratuitos que estén en la
+        carpeta plugins/ (útil durante desarrollo de nuevos plugins libres).
+        """
         if not self.plugin_manager:
             return
         print("[UI] Loading free plugins...")
@@ -3628,26 +4503,26 @@ class MainWindow(QMainWindow):
         try:
             import json
             import os
+            from pathlib import Path
 
-            # Leer configuración de plugins
+            loaded_any = False
+
+            # 1. Cargar desde plugin_config.json (plugins registrados)
             config_file = "plugins/plugin_config.json"
-            if not os.path.exists(config_file):
-                print("[UI] No plugin config file found")
-                return
-            with open(config_file, "r") as f:
-                plugin_config = json.load(f)
-            # Cargar plugins habilitados y gratuitos
+            plugin_config = {}
+            if os.path.exists(config_file):
+                with open(config_file, "r") as f:
+                    plugin_config = json.load(f)
+
             for plugin_id, config in plugin_config.items():
                 if not config.get("enabled", False):
                     continue
-                # Verificar si el plugin existe
                 plugin_dir = os.path.join("plugins", plugin_id)
                 if not os.path.exists(plugin_dir):
                     continue
-                # Leer plugin_info.json para verificar si es premium
+
                 plugin_info_file = os.path.join(plugin_dir, "plugin_info.json")
                 is_premium = False
-
                 if os.path.exists(plugin_info_file):
                     try:
                         with open(plugin_info_file, "r") as f:
@@ -3655,19 +4530,62 @@ class MainWindow(QMainWindow):
                             is_premium = plugin_info.get("premium", False)
                     except:
                         pass
-                # Cargar solo plugins gratuitos
-                if not is_premium:
-                    print(f"[UI] Loading free plugin: {plugin_id}")
+
+                dev_mode = bool(config.get("dev_mode", False))
+
+                if (not is_premium) or dev_mode:
+                    label = "dev" if (is_premium and dev_mode) else "free"
+                    print(f"[UI] Loading {label} plugin: {plugin_id}")
                     if self.plugin_manager.load_plugin(plugin_id):
-                        print(f"[UI] Free plugin {plugin_id} loaded successfully")
+                        print(f"[UI] {label.capitalize()} plugin {plugin_id} loaded successfully")
+                        loaded_any = True
                     else:
-                        print(f"[UI] Failed to load free plugin {plugin_id}")
+                        print(f"[UI] Failed to load {label} plugin {plugin_id}")
                 else:
                     print(f"[UI] Skipping premium plugin: {plugin_id}")
+
+            # 2. Descubrimiento automático de plugins gratuitos nuevos (para desarrollo)
+            # Esto permite que un plugin nuevo con "premium": false en su plugin_info.json
+            # se cargue aunque no esté todavía en plugin_config.json
+            plugins_dir = Path("plugins")
+            if plugins_dir.exists():
+                for item in plugins_dir.iterdir():
+                    if not item.is_dir():
+                        continue
+                    plugin_id = item.name
+                    if plugin_id in plugin_config:   # ya procesado arriba
+                        continue
+                    if plugin_id in self.plugin_manager.plugins:  # ya cargado
+                        continue
+
+                    init_file = item / "__init__.py"
+                    info_file = item / "plugin_info.json"
+                    if not init_file.exists() or not info_file.exists():
+                        continue
+
+                    try:
+                        with open(info_file, "r", encoding="utf-8") as f:
+                            plugin_info = json.load(f)
+
+                        is_premium = plugin_info.get("premium", True)
+                        if is_premium:
+                            continue  # solo auto-cargamos gratuitos en descubrimiento
+
+                        print(f"[UI] Auto-discovered free plugin: {plugin_id}")
+                        if self.plugin_manager.load_plugin(plugin_id):
+                            print(f"[UI] Free plugin {plugin_id} loaded successfully (auto-discovered)")
+                            loaded_any = True
+                        else:
+                            print(f"[UI] Failed to auto-load free plugin {plugin_id}")
+                    except Exception as e:
+                        print(f"[UI] Error auto-discovering plugin {plugin_id}: {e}")
+
+            if not loaded_any:
+                print("[UI] No additional free plugins to load")
+
         except Exception as e:
             print(f"[UI] Error loading free plugins: {e}")
             import traceback
-
             traceback.print_exc()
     def _setup_auth_panel(self):
         """Setup authentication panel after auth_manager is ready"""
@@ -3742,6 +4660,14 @@ class MainWindow(QMainWindow):
                             # Cargar UI específica del plugin de temas
                             if plugin_id == "themes":
                                 self._load_themes_plugin_dynamic(plugin_instance)
+
+                            # ============================================================
+                            # GENERIC SUPPORT FOR PLUGINBASE PLUGINS WITH SIDEBAR
+                            # ============================================================
+                            # Any plugin that follows the pattern can get a left sidebar
+                            # button + advanced panel without modifying ui.py again.
+                            self._try_register_plugin_sidebar(plugin_instance, plugin_id)
+
                         else:
                             print(
                                 f"[UI] Plugin {plugin_id} initialization returned False"
@@ -3753,8 +4679,8 @@ class MainWindow(QMainWindow):
                         traceback.print_exc()
                 return
             # Verificar si el plugin tiene get_plugin_panel (plugins antiguos)
-            # pentesting_tool usa get_panel_class, no bloquearlo
-            if plugin_id != "pentesting_tool":
+            # pentesting_tool y ai_live_ide usan get_panel_class, no bloquearlos
+            if plugin_id not in ("pentesting_tool", "ai_live_ide"):
                 if (
                     not hasattr(plugin_module, "get_scraping_panel")
                     and not hasattr(plugin_module, "get_proxy_panel")
@@ -3775,6 +4701,10 @@ class MainWindow(QMainWindow):
                 plugin_module, "get_panel_class"
             ):
                 self._load_pentesting_plugin_dynamic(plugin_module)
+            elif plugin_id == "ai_live_ide" and hasattr(
+                plugin_module, "get_panel_class"
+            ):
+                self._load_ai_live_ide_plugin_dynamic(plugin_module)
             elif plugin_id == "themes":
                 print(f"[UI] Themes plugin loaded, no UI changes needed")
             else:
@@ -3784,6 +4714,60 @@ class MainWindow(QMainWindow):
             import traceback
 
             traceback.print_exc()
+
+    def _try_register_plugin_sidebar(self, plugin_instance, plugin_id: str):
+        """
+        Generic handler for PluginBase plugins that want a button in the
+        left sidebar + panel in advanced_panel_stack.
+
+        A well-behaved plugin should expose after initialize():
+            - .panel (the QWidget / ScrapelioPanelBase to show)
+            - .get_sidebar_action() -> QAction   (optional but recommended)
+            - .sidebar_action                  (fallback)
+        """
+        try:
+            # 1. Register the panel if the plugin created one
+            panel = None
+            if hasattr(plugin_instance, "get_panel"):
+                panel = plugin_instance.get_panel()
+            elif hasattr(plugin_instance, "panel"):
+                panel = plugin_instance.panel
+
+            if panel and hasattr(self, "advanced_panel_stack"):
+                if self.advanced_panel_stack.indexOf(panel) < 0:
+                    self.advanced_panel_stack.addWidget(panel)
+                    print(f"[UI] Panel registered for plugin: {plugin_id}")
+
+            # 2. Add sidebar button if the plugin provides one
+            action = None
+            if hasattr(plugin_instance, "get_sidebar_action"):
+                action = plugin_instance.get_sidebar_action()
+            elif hasattr(plugin_instance, "sidebar_action"):
+                action = plugin_instance.sidebar_action
+
+            if action and hasattr(self, "side_strip"):
+                if plugin_id not in self.dynamic_plugin_actions:
+                    # Try to insert before "Plugin Store" for nice ordering
+                    actions = self.side_strip.actions()
+                    store_index = -1
+                    for i, a in enumerate(actions):
+                        if "plugin" in a.text().lower() or "store" in a.text().lower():
+                            store_index = i
+                            break
+
+                    if store_index >= 0:
+                        self.side_strip.insertAction(actions[store_index], action)
+                    else:
+                        self.side_strip.addAction(action)
+
+                    self.dynamic_plugin_actions[plugin_id] = action
+                    print(f"[UI] Sidebar button added for plugin: {plugin_id}")
+
+        except Exception as e:
+            print(f"[UI] Error in generic sidebar registration for {plugin_id}: {e}")
+            import traceback
+            traceback.print_exc()
+
     def _load_scraping_plugin_dynamic(self, plugin_module):
         """Cargar plugin de scraping dinámicamente"""
         global SCRAPING_AVAILABLE
@@ -3798,10 +4782,7 @@ class MainWindow(QMainWindow):
                 print("[UI] Failed to get scraping components")
                 return
             # Crear panel
-            self.scraping_panel = ScrapingPanel(
-                scraping_integration,
-                plugin_validator=self.plugin_manager,
-            )
+            self.scraping_panel = ScrapingPanel(scraping_integration, plugin_validator=self.plugin_manager)
             self.scraping_integration = scraping_integration
 
             # Crear dock widget (reemplazar si ya existe)
@@ -3819,9 +4800,9 @@ class MainWindow(QMainWindow):
                 self.addDockWidget(Qt.RightDockWidgetArea, self.scraping_dock)
                 self.scraping_dock.hide()
                 print("[UI] Created new scraping dock widget")
-            # Habilitar panel si el usuario está autenticado
+            # Habilitar panel solo si el usuario está autenticado Y tiene licencia/trial de scraping
             if self.auth_manager and self.auth_manager.auth_state.is_authenticated:
-                self.scraping_panel.setEnabled(True)
+                self.scraping_panel.setEnabled(self._plugin_has_subscription("scraping"))
             # Verificar si ya existe un botón de scraping (del import estático)
             existing_scraping_action = None
             for action in self.side_strip.actions():
@@ -3912,9 +4893,9 @@ class MainWindow(QMainWindow):
                 self.addDockWidget(Qt.RightDockWidgetArea, self.proxy_dock)
                 self.proxy_dock.hide()
                 print("[UI] Created new proxy dock widget")
-            # Habilitar panel si el usuario está autenticado
+            # Habilitar panel solo si el usuario está autenticado Y tiene licencia/trial de proxy
             if self.auth_manager and self.auth_manager.auth_state.is_authenticated:
-                self.proxy_panel.setEnabled(True)
+                self.proxy_panel.setEnabled(self._plugin_has_subscription("proxy"))
             # Verificar si ya existe un botón de proxy (del import estático)
             existing_proxy_action = None
             for action in self.side_strip.actions():
@@ -3977,8 +4958,29 @@ class MainWindow(QMainWindow):
             if not SEOPanel:
                 print("[UI] SEO plugin running in compatibility mode (no UI available)")
                 return
+            # Determinar el tier real según la licencia del usuario (antes el panel
+            # SEO caía siempre en tier "pro" por defecto, sin validar suscripción).
+            tier = "free"
+            try:
+                if self.plugin_manager:
+                    access_info = self.plugin_manager.get_plugin_access("seo_analyzer")
+                    if access_info.access_level.value != "free":
+                        tier = "pro"
+            except Exception as e:
+                print(f"[WARNING] No se pudo determinar el tier real de SEO Analyzer: {e}")
+
+            TierManagerClass = None
+            if hasattr(plugin_module, "get_tier_manager"):
+                try:
+                    TierManagerClass = plugin_module.get_tier_manager()
+                except Exception as e:
+                    print(f"[WARNING] No se pudo obtener TierManager del plugin SEO: {e}")
+
             # Crear panel
-            self.seo_panel = SEOPanel(parent=self)
+            if TierManagerClass:
+                self.seo_panel = SEOPanel(parent=self, tier_manager=TierManagerClass(tier))
+            else:
+                self.seo_panel = SEOPanel(parent=self)
 
             # Crear dock widget (reemplazar si ya existe)
             if hasattr(self, "seo_dock") and self.seo_dock:
@@ -4127,6 +5129,288 @@ class MainWindow(QMainWindow):
             import traceback
 
             traceback.print_exc()
+    def _load_ai_live_ide_plugin_dynamic(self, plugin_module):
+        """Cargar plugin AI Live IDE dinámicamente.
+
+        DISEÑO UI/UX:
+            - El panel se monta DIRECTAMENTE en el área central del navegador,
+              dentro de un QSplitter vertical que envuelve a las pestañas web
+              (arriba) y al panel del IDE (abajo). NO usamos QDockWidget porque
+              eso forzaba al QMainWindow a comprimir la nav_bar y demás
+              controles en columnas verticales a los lados del dock.
+            - Con este enfoque la nav_bar (URL, recargar, etc.) queda intacta
+              ARRIBA y el IDE ocupa el área de contenido sin reorganizar nada
+              más.
+            - Por defecto, al abrir el IDE se ocultan las pestañas web para
+              dar pantalla completa al editor. El usuario puede mostrarlas con
+              el botón "📑 Pestañas web" del propio panel (modo split).
+
+        Si el plugin está en `dev_mode` (plugin_config.json) o el usuario
+        no está autenticado todavía, instanciamos el panel SIN validator
+        para que `@requires_premium` aplique bypass automático.
+        """
+        try:
+            print("[UI] Loading AI Live IDE plugin dynamically...")
+
+            import sys
+            from pathlib import Path
+
+            plugin_dir = Path(__file__).parent / "plugins" / "ai_live_ide"
+            if str(plugin_dir) not in sys.path:
+                sys.path.insert(0, str(plugin_dir))
+            AILiveIDEPanelClass = plugin_module.get_panel_class()
+
+            if not AILiveIDEPanelClass:
+                print("[UI] AI Live IDE plugin panel class not available")
+                return
+            # Detectar modo desarrollo desde plugin_config.json
+            import json
+            dev_mode = False
+            cfg_path = Path(__file__).parent / "plugins" / "plugin_config.json"
+            try:
+                if cfg_path.exists():
+                    with open(cfg_path, "r", encoding="utf-8") as _f:
+                        _cfg = json.load(_f)
+                    dev_mode = bool(
+                        _cfg.get("ai_live_ide", {}).get("dev_mode", False)
+                    )
+            except Exception as _e:
+                print(f"[UI] Could not read plugin_config.json: {_e}")
+            validator = None if dev_mode else self.plugin_manager
+            print(
+                f"[UI] AI Live IDE: dev_mode={dev_mode} "
+                f"(validator={'None' if validator is None else 'plugin_manager'})"
+            )
+
+            # ── 1) Limpiar cualquier dock previo de versiones anteriores ──
+            #     (sesiones previas de Qt pueden haber serializado un dock)
+            old_dock = getattr(self, "ai_live_ide_dock", None)
+            if old_dock is not None:
+                try:
+                    self.removeDockWidget(old_dock)
+                    old_dock.deleteLater()
+                except Exception:  # noqa: BLE001
+                    pass
+                self.ai_live_ide_dock = None
+
+            # ── 2) Reutilizar panel si ya existe ─────────────────────────
+            existing_panel = getattr(self, "ai_live_ide_panel", None)
+            if existing_panel is not None:
+                print("[UI] AI Live IDE panel already exists, reusing")
+                self.dynamic_plugin_panels["ai_live_ide"] = existing_panel
+                return
+
+            # ── 3) Crear el panel ────────────────────────────────────────
+            self.ai_live_ide_panel = AILiveIDEPanelClass(
+                plugin_validator=validator,
+                parent=self,
+            )
+
+            # Conectar señales del panel hacia el host (mostrar/ocultar tabs)
+            try:
+                self.ai_live_ide_panel.toggle_browser_tabs_requested.connect(
+                    self._toggle_browser_tabs_from_ide
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[UI] toggle_browser_tabs signal connect warn: {exc}")
+            try:
+                self.ai_live_ide_panel.close_ide_requested.connect(
+                    self._close_ide_mode
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[UI] close_ide signal connect warn: {exc}")
+
+            # ── 4) Insertar en el área central con un QSplitter vertical ──
+            self._ensure_workspace_v_splitter()
+            self._workspace_v_splitter.addWidget(self.ai_live_ide_panel)
+            self.ai_live_ide_panel.hide()  # oculto hasta activar
+            # Stretch: tabs flexible, IDE flexible. Al ocultar uno, el otro
+            # ocupa el 100% automáticamente.
+            self._workspace_v_splitter.setStretchFactor(0, 1)
+            self._workspace_v_splitter.setStretchFactor(1, 1)
+
+            # ── 5) Añadir botón al side strip ────────────────────────────
+            existing_action = None
+            for action in self.side_strip.actions():
+                if action.text() == "AI Live IDE":
+                    existing_action = action
+                    break
+            if (
+                not existing_action
+                and "ai_live_ide" not in self.dynamic_plugin_actions
+            ):
+                print("[UI] Creating AI Live IDE side-strip button...")
+                self.ai_live_ide_action = self._make_strip_action(
+                    "ai_live_ide", "AI Live IDE", self.toggle_ai_live_ide_panel
+                )
+                actions = self.side_strip.actions()
+                store_index = -1
+                for i, action in enumerate(actions):
+                    if action.text() == "Plugin Store":
+                        store_index = i
+                        break
+                if store_index >= 0:
+                    self.side_strip.insertAction(
+                        actions[store_index], self.ai_live_ide_action
+                    )
+                else:
+                    self.side_strip.addAction(self.ai_live_ide_action)
+                self.dynamic_plugin_actions["ai_live_ide"] = self.ai_live_ide_action
+                print("[UI] AI Live IDE button added to sidebar")
+            self.dynamic_plugin_panels["ai_live_ide"] = self.ai_live_ide_panel
+
+            # Refrescar UI premium una vez con el validador real
+            if hasattr(self.ai_live_ide_panel, "update_premium_ui"):
+                self.ai_live_ide_panel.update_premium_ui("ai_live_ide")
+            print("[UI] AI Live IDE plugin loaded successfully (central area)")
+        except Exception as e:
+            print(f"[UI] Error loading AI Live IDE plugin: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    # ── Helpers de integración con el área central ───────────────────────
+
+    def _ensure_workspace_v_splitter(self):
+        """Crea (idempotente) un QSplitter vertical que envuelve las
+        pestañas web del navegador y deja sitio para el panel del IDE
+        debajo. La nav_bar (URL/controles) queda intacta arriba porque
+        vive en `main_layout`, fuera del `content_splitter`.
+        """
+        if getattr(self, "_workspace_v_splitter", None) is not None:
+            return
+        from PySide6.QtWidgets import QSplitter as _QSplitter
+
+        tabs = getattr(self.tab_manager, "tabs", None)
+        if tabs is None:
+            print("[UI] tab_manager.tabs missing — no se puede crear split")
+            return
+        cs = self.content_splitter
+        tabs_idx = cs.indexOf(tabs)
+        if tabs_idx < 0:
+            print("[UI] tabs widget no está en content_splitter")
+            return
+        sizes_before = cs.sizes()
+
+        v_splitter = _QSplitter(Qt.Vertical)
+        v_splitter.setObjectName("aiLiveIdeWorkspaceSplit")
+        v_splitter.setChildrenCollapsible(True)
+        v_splitter.setHandleWidth(2)
+        v_splitter.setStyleSheet(
+            "QSplitter::handle { background: rgba(255,255,255,0.06); } "
+            "QSplitter::handle:hover { background: rgba(75,158,255,0.40); }"
+        )
+        # Mover las tabs al splitter vertical (arriba)
+        tabs.setParent(None)
+        v_splitter.addWidget(tabs)
+        # Insertar el splitter en la misma posición que ocupaban las tabs
+        cs.insertWidget(tabs_idx, v_splitter)
+        cs.setSizes(sizes_before)
+        cs.setStretchFactor(tabs_idx, 1)
+        self._workspace_v_splitter = v_splitter
+        print("[UI] Created vertical workspace splitter for AI Live IDE")
+
+    def toggle_ai_live_ide_panel(self):
+        """Activar/desactivar el modo IDE en el área central."""
+        panel = getattr(self, "ai_live_ide_panel", None)
+        if panel is None:
+            print("[UI] AI Live IDE panel not initialized yet")
+            return
+        if panel.isVisible():
+            self._close_ide_mode()
+        else:
+            self._open_ide_mode()
+
+    def _open_ide_mode(self):
+        """Entra en modo IDE: oculta las pestañas web y muestra el panel
+        del IDE ocupando todo el área de contenido. La nav_bar y la
+        side_strip quedan visibles e interactivas.
+        """
+        panel = getattr(self, "ai_live_ide_panel", None)
+        if panel is None:
+            return
+        v_splitter = getattr(self, "_workspace_v_splitter", None)
+        tabs = getattr(self.tab_manager, "tabs", None) if hasattr(
+            self, "tab_manager"
+        ) else None
+        if tabs is not None:
+            if not hasattr(self, "_browser_tabs_prev_visible"):
+                self._browser_tabs_prev_visible = tabs.isVisible()
+            tabs.hide()
+        panel.show()
+        # Sincronizar el toggle del propio panel
+        if hasattr(panel, "_act_toggle_browser_tabs"):
+            try:
+                panel._act_toggle_browser_tabs.blockSignals(True)
+                panel._act_toggle_browser_tabs.setChecked(False)
+                panel._act_toggle_browser_tabs.blockSignals(False)
+            except Exception:  # noqa: BLE001
+                pass
+        # Ajustar el split vertical para que el IDE ocupe el 100%
+        if v_splitter is not None:
+            v_splitter.setSizes([0, v_splitter.height() or 800])
+        # Refrescar estado premium al mostrarse
+        if hasattr(panel, "update_premium_ui"):
+            panel.update_premium_ui("ai_live_ide")
+
+    def _close_ide_mode(self):
+        """Sale del modo IDE: oculta el panel del IDE y restaura las
+        pestañas web del navegador.
+        """
+        panel = getattr(self, "ai_live_ide_panel", None)
+        if panel is None:
+            return
+        panel.hide()
+        tabs = getattr(self.tab_manager, "tabs", None) if hasattr(
+            self, "tab_manager"
+        ) else None
+        if tabs is not None:
+            # Restauramos tabs si fueron ocultadas por nosotros
+            if getattr(self, "_browser_tabs_prev_visible", True):
+                tabs.show()
+            if hasattr(self, "_browser_tabs_prev_visible"):
+                delattr(self, "_browser_tabs_prev_visible")
+        v_splitter = getattr(self, "_workspace_v_splitter", None)
+        if v_splitter is not None:
+            v_splitter.setSizes([v_splitter.height() or 800, 0])
+
+    def _toggle_browser_tabs_from_ide(self):
+        """Slot llamado por el panel del IDE cuando el usuario pulsa
+        'Pestañas web': alterna la visibilidad del QTabWidget mientras
+        seguimos en modo IDE (vista split).
+        """
+        tabs = getattr(self.tab_manager, "tabs", None) if hasattr(
+            self, "tab_manager"
+        ) else None
+        if tabs is None:
+            return
+        panel = getattr(self, "ai_live_ide_panel", None)
+        v_splitter = getattr(self, "_workspace_v_splitter", None)
+        if tabs.isVisible():
+            tabs.hide()
+            # IDE ocupa todo
+            if v_splitter is not None:
+                v_splitter.setSizes([0, v_splitter.height() or 800])
+            if panel is not None and hasattr(panel, "_act_toggle_browser_tabs"):
+                try:
+                    panel._act_toggle_browser_tabs.blockSignals(True)
+                    panel._act_toggle_browser_tabs.setChecked(False)
+                    panel._act_toggle_browser_tabs.blockSignals(False)
+                except Exception:  # noqa: BLE001
+                    pass
+        else:
+            tabs.show()
+            # Split 40% tabs / 60% IDE
+            if v_splitter is not None:
+                total = v_splitter.height() or 800
+                v_splitter.setSizes([int(total * 0.40), int(total * 0.60)])
+            if panel is not None and hasattr(panel, "_act_toggle_browser_tabs"):
+                try:
+                    panel._act_toggle_browser_tabs.blockSignals(True)
+                    panel._act_toggle_browser_tabs.setChecked(True)
+                    panel._act_toggle_browser_tabs.blockSignals(False)
+                except Exception:  # noqa: BLE001
+                    pass
     def _load_themes_plugin_dynamic(self, plugin_instance):
         """Cargar plugin de temas dinámicamente"""
         try:
@@ -4505,25 +5789,22 @@ class MainWindow(QMainWindow):
             page.loadFinished.disconnect()
         except:
             pass
-        # Conectar señales del browser al status bar
-        # linkHovered es señal de QWebEnginePage, no de QWebEngineView
-        page.linkHovered.connect(self.status_bar.update_url_hover)
+        # Indicador SSL en la navbar (reemplaza la barra de estado inferior)
+        if hasattr(self, "ssl_indicator"):
+            browser.urlChanged.connect(
+                lambda url: self.ssl_indicator.update_ssl(url.toString())
+            )
+            current_url = browser.url().toString()
+            if current_url:
+                self.ssl_indicator.update_ssl(current_url)
 
-        browser.urlChanged.connect(
-            lambda url: self.status_bar.update_ssl_status(url.toString())
-        )
+        # Status bar oculta — mantener señales funcionales para showMessage()
         browser.loadProgress.connect(self.status_bar.update_load_progress)
-
-        # Conectar señales de la página
         page.loadStarted.connect(
             lambda: self.status_bar.update_load_status("Cargando...")
         )
         page.loadFinished.connect(lambda: self.status_bar.update_load_status(""))
 
-        # Actualizar SSL status de la pestaña actual
-        current_url = browser.url().toString()
-        if current_url:
-            self.status_bar.update_ssl_status(current_url)
         # Actualizar zoom level
         zoom_factor = browser.zoomFactor()
         self.status_bar.update_zoom(zoom_factor)
@@ -4580,8 +5861,7 @@ class MainWindow(QMainWindow):
                     profile.cookieStore().deleteAllCookies()
                     print("[Menu] Cookies eliminadas")
                 if passwords_check.isChecked() and hasattr(self, "password_manager"):
-                    # Implementar limpieza de contraseñas si es necesario
-                    print("[Menu] Contraseñas limpiadas")
+                    self.password_manager.clear_all_passwords()
                 QMessageBox.information(
                     self, "Éxito", "Datos de navegación eliminados correctamente"
                 )
@@ -4631,13 +5911,11 @@ class MainWindow(QMainWindow):
             # Aplicar nuevos estilos a la navbar usando ThemeEngine
             self._refresh_navbar_style()
 
-            # Aplicar nuevo estilo al URL bar
-            urlbar_style = self.modern_styles.get_urlbar_style()
-            self.url_bar.setStyleSheet(urlbar_style)
+            # Aplicar nuevo estilo al URL bar (vía ThemeEngine)
+            self._refresh_url_bar_style()
 
-            # Aplicar nuevo estilo a las pestañas
-            tab_style = self.modern_styles.get_tab_style()
-            self.tab_manager.tabs.setStyleSheet(tab_style)
+            # Aplicar nuevo estilo a las pestañas (vía ThemeEngine para respetar el tema)
+            self._refresh_tab_bar_style()
 
             # Mensaje de confirmación en status bar
             theme_names = {"light": "Claro", "dark": "Oscuro", "blue": "Azul"}
@@ -4812,7 +6090,14 @@ class MainWindow(QMainWindow):
         dialog.exec()
     def show_settings(self):
         """Mostrar panel de configuración"""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QWidget, QLabel
+        from PySide6.QtWidgets import (
+            QDialog,
+            QVBoxLayout,
+            QTabWidget,
+            QWidget,
+            QLabel,
+            QGroupBox,
+        )
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Configuración - Scrapelio")
@@ -4826,6 +6111,27 @@ class MainWindow(QMainWindow):
         general_tab = QWidget()
         general_layout = QVBoxLayout(general_tab)
         general_layout.addWidget(QLabel("Configuración general del navegador"))
+
+        appearance_gb = QGroupBox("Ventana")
+        apl = QVBoxLayout(appearance_gb)
+        frameless_chk = QCheckBox(
+            "Ventana sin marco del sistema (botones − □ ✕ en la barra superior)"
+        )
+        frameless_chk.setChecked(
+            self.settings.value("ui/frameless_window", False, type=bool)
+        )
+        frameless_chk.setToolTip(
+            "Oculta la decoración nativa del escritorio.\n"
+            "Arrastra la ventana desde el espacio flexible entre la URL "
+            "y los iconos derechos."
+        )
+        frameless_chk.toggled.connect(
+            lambda c: self._set_frameless_window(bool(c), persist=True)
+        )
+        self._frameless_settings_check = frameless_chk
+        apl.addWidget(frameless_chk)
+        apl.addStretch(1)
+        general_layout.addWidget(appearance_gb)
 
         # Página de inicio
         if hasattr(self, "homepage_manager") and self.homepage_manager:
@@ -4927,6 +6233,10 @@ class MainWindow(QMainWindow):
         close_btn.clicked.connect(dialog.accept)
         layout.addWidget(close_btn)
 
+        def _cleanup_frameless_ref(_result=None):
+            setattr(self, "_frameless_settings_check", None)
+
+        dialog.finished.connect(_cleanup_frameless_ref)
         dialog.exec()
     def show_about(self):
         """Mostrar información acerca de"""

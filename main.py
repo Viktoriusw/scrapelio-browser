@@ -81,8 +81,43 @@ def _configure_tor_proxy_if_needed():
         _logger.warning("[TOR] Módulo no disponible: %s", e)
 
 
+def _configure_stealth_chromium_flags():
+    """Inyecta flags Chromium que eliminan las señales de automatización.
+
+    --disable-blink-features=AutomationControlled: impide que Chromium
+    establezca navigator.webdriver=true vía C++, que es la señal principal
+    que usa Google para redirigir a /sorry/index con CAPTCHA infinito.
+
+    Debe llamarse ANTES de crear QApplication (los flags se leen al inicio).
+    Si --webEngineArgs ya está en sys.argv (ej. por Tor), los flags se
+    insertan inmediatamente después para que Chromium los recoja.
+    """
+    stealth_flags = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+        # SharedArrayBuffer sin COOP/COEP: necesario para WASM workers (Amazon IVS/Twitch).
+        "--enable-features=SharedArrayBuffer",
+        # Deshabilitar VA-API (hardware decode) — falla en este sistema (vaMapBuffer2 missing).
+        # Forzar FFmpeg software decode, que sí tiene H.264/AAC compilado.
+        "--disable-features=VaapiVideoDecoder,VaapiVideoDecodeLinuxGL",
+    ]
+    if "--webEngineArgs" in sys.argv:
+        idx = sys.argv.index("--webEngineArgs")
+        for flag in stealth_flags:
+            if flag not in sys.argv:
+                idx += 1
+                sys.argv.insert(idx, flag)
+    else:
+        sys.argv.append("--webEngineArgs")
+        for flag in stealth_flags:
+            if flag not in sys.argv:
+                sys.argv.append(flag)
+    _logger.debug("[STEALTH] Chromium anti-automation flags configurados: %s", stealth_flags)
+
+
 # CRÍTICO: Configurar proxy Tor ANTES de cargar ui (QtWebEngine).
 _configure_tor_proxy_if_needed()
+_configure_stealth_chromium_flags()
 
 # Importar MainWindow desde ui.py (no desde el paquete ui/)
 sys.path.insert(0, os.path.dirname(__file__))

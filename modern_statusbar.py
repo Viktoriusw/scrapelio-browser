@@ -13,8 +13,115 @@ Características:
 
 from PySide6.QtWidgets import (QStatusBar, QLabel, QWidget, QHBoxLayout,
                                QPushButton, QMessageBox, QFrame)
-from PySide6.QtCore import Qt, QUrl, QPropertyAnimation, QEasingCurve, QTimer
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import Qt, QUrl, QByteArray, QPropertyAnimation, QEasingCurve, QTimer, QSize
+from PySide6.QtGui import QCursor, QPixmap, QIcon
+from PySide6.QtSvg import QSvgRenderer
+
+
+# ── SVG inline para el indicador SSL ──────────────────────────────────────────
+
+_SVG_LOCK = """<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="5" y="11" width="14" height="10" rx="2" fill="{color}"/>
+  <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="{color}" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="12" cy="16" r="1.2" fill="white"/>
+</svg>"""
+
+_SVG_LOCK_OPEN = """<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="5" y="11" width="14" height="10" rx="2" fill="{color}"/>
+  <path d="M8 11V7a4 4 0 0 1 8 0" stroke="{color}" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="16" y1="4" x2="19" y2="7" stroke="{color}" stroke-width="2"
+        stroke-linecap="round"/>
+  <circle cx="12" cy="16" r="1.2" fill="white"/>
+</svg>"""
+
+_SVG_WARN = """<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+        fill="{color}"/>
+  <line x1="12" y1="9" x2="12" y2="13" stroke="white" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="12" cy="17" r="1" fill="white"/>
+</svg>"""
+
+
+def _svg_to_pixmap(svg_template: str, color: str, size: int = 16) -> QPixmap:
+    svg = svg_template.replace("{color}", color).encode("utf-8")
+    renderer = QSvgRenderer(QByteArray(svg))
+    px = QPixmap(QSize(size, size))
+    px.fill(Qt.transparent)
+    from PySide6.QtGui import QPainter
+    p = QPainter(px)
+    renderer.render(p)
+    p.end()
+    return px
+
+
+# ── SslIndicatorButton ────────────────────────────────────────────────────────
+
+class SslIndicatorButton(QLabel):
+    """
+    Icono SSL compacto para la barra de navegación.
+    Muestra candado cerrado (HTTPS), triángulo de advertencia (HTTP)
+    o nada (nueva pestaña / página interna).
+    """
+
+    _SIZE = 16   # px del icono SVG
+    _BTN  = 28   # px del botón contenedor
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._current_url = ""
+        self.setFixedSize(self._BTN, self._BTN)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+        self.clear()
+
+    def update_ssl(self, url_string: str):
+        """Actualiza el icono según el esquema de la URL."""
+        self._current_url = url_string
+        if url_string.startswith("https://"):
+            px = _svg_to_pixmap(_SVG_LOCK, "#5f9ea0", self._SIZE)
+            self.setPixmap(px)
+            self.setToolTip("Conexión segura (HTTPS)")
+            self.setVisible(True)
+        elif url_string.startswith("http://"):
+            px = _svg_to_pixmap(_SVG_WARN, "#e5743a", self._SIZE)
+            self.setPixmap(px)
+            self.setToolTip("Conexión no segura — este sitio no usa HTTPS")
+            self.setVisible(True)
+        else:
+            self.clear()
+            self.setToolTip("")
+            self.setVisible(False)
+
+    def apply_theme(self, colors: dict):
+        """Retiñe el icono con los colores del tema activo."""
+        self.update_ssl(self._current_url)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._show_popup()
+        super().mousePressEvent(event)
+
+    def _show_popup(self):
+        url = QUrl(self._current_url)
+        host = url.host() or self._current_url
+        if self._current_url.startswith("https://"):
+            title = "Conexión segura"
+            body  = (f"<b>{host}</b> usa HTTPS.<br><br>"
+                     "Tu conexión está cifrada y el sitio ha verificado su identidad.")
+        elif self._current_url.startswith("http://"):
+            title = "Conexión no segura"
+            body  = (f"<b>{host}</b> no usa HTTPS.<br><br>"
+                     "La información enviada a este sitio puede ser interceptada por terceros.")
+        else:
+            return
+        msg = QMessageBox()
+        msg.setWindowTitle(title)
+        msg.setTextFormat(Qt.RichText)
+        msg.setText(body)
+        msg.setIcon(QMessageBox.Information if "segura" in title else QMessageBox.Warning)
+        msg.exec()
 
 
 class ModernStatusBar(QStatusBar):

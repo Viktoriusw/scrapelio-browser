@@ -8,8 +8,19 @@ and theme support.
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QHBoxLayout,
                                QGroupBox, QPushButton, QLabel, QFrame)
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QSize
 from typing import List, Tuple, Callable, Dict, Any
+
+try:
+    from ui.core.strip_icons import resolve_icon_path, build_strip_icon
+    ICONS_AVAILABLE = True
+except ImportError:
+    ICONS_AVAILABLE = False
+    def resolve_icon_path(name, icons_dir=None):
+        return ""
+    def build_strip_icon(path, color_hex, size):
+        from PySide6.QtGui import QIcon
+        return QIcon()
 
 # Import theme system
 try:
@@ -103,16 +114,29 @@ class BasePanel(QWidget):
         self.tab_widget = QTabWidget()
 
         self.tab_widget.setDocumentMode(True)  # Flat tabs modern style
+        self.tab_widget.setIconSize(QSize(16, 16))
 
         # Create all tabs using definitions from child class
+        # Supports both legacy 2-tuples (create_method, title) and
+        # icon-aware 3-tuples (create_method, icon_name, title).
 
         try:
             tab_definitions = self.get_tab_definitions()
 
-            for create_method, title in tab_definitions:
+            for tab_def in tab_definitions:
+                if len(tab_def) == 3:
+                    create_method, icon_name, title = tab_def
+                else:
+                    create_method, title = tab_def
+                    icon_name = None
+
                 tab_widget = create_method()
 
-                self.tab_widget.addTab(tab_widget, title)
+                if icon_name:
+                    idx = self.tab_widget.addTab(tab_widget, title)
+                    self._register_tab_icon(idx, icon_name)
+                else:
+                    self.tab_widget.addTab(tab_widget, title)
         except NotImplementedError:
             # If child class doesn't implement get_tab_definitions, 
 
@@ -204,6 +228,95 @@ class BasePanel(QWidget):
         group.setLayout(layout)
 
         return group
+    def create_icon_button(self, icon_name: str, tooltip: str, callback: Callable = None,
+                           size: int = 34, icon_size: int = 18) -> QPushButton:
+        """
+        Crea un botón sólo-icono (sin texto) con tooltip, coloreado según el
+        tema activo. Se registra para refrescar su tinte cuando cambia el tema.
+
+        Args:
+            icon_name: Nombre del SVG/PNG en icons/ (sin extensión).
+            tooltip:   Texto que se muestra al pasar el ratón.
+            callback:  Slot a conectar con clicked.
+            size:      Tamaño del botón en px (cuadrado).
+            icon_size: Tamaño del icono renderizado en px.
+        Returns:
+            QPushButton configurado.
+        """
+        btn = QPushButton()
+        btn.setObjectName("scrapelioIconBtn")
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedSize(size, size)
+        btn.setProperty("icon_name", icon_name)
+        btn.setProperty("icon_size", icon_size)
+        if callback:
+            btn.clicked.connect(callback)
+        if not hasattr(self, "_icon_buttons"):
+            self._icon_buttons: List[QPushButton] = []
+        self._icon_buttons.append(btn)
+        self._refresh_icon_button(btn)
+        return btn
+
+    def create_icon_button_row(self, buttons: List[Tuple[str, str, Callable]],
+                               size: int = 34, icon_size: int = 18) -> QHBoxLayout:
+        """
+        Crea una fila horizontal de botones sólo-icono.
+
+        Args:
+            buttons: Lista de (icon_name, tooltip, callback)
+        Returns:
+            QHBoxLayout con los botones configurados.
+        """
+        layout = QHBoxLayout()
+        for icon_name, tooltip, callback in buttons:
+            btn = self.create_icon_button(icon_name, tooltip, callback, size, icon_size)
+            layout.addWidget(btn)
+        return layout
+
+    def _refresh_icon_button(self, btn: QPushButton) -> None:
+        """Vuelve a teñir el icono de un botón con el color del tema activo."""
+        if not ICONS_AVAILABLE:
+            return
+        icon_name = btn.property("icon_name")
+        if not icon_name:
+            return
+        icon_size = btn.property("icon_size") or 18
+        color = self.get_theme_colors().get("text_secondary", "#A0A0A0")
+        path = resolve_icon_path(icon_name)
+        if path:
+            icon = build_strip_icon(path, color, QSize(icon_size, icon_size))
+            if not icon.isNull():
+                btn.setIcon(icon)
+                btn.setIconSize(QSize(icon_size, icon_size))
+
+    def _refresh_all_icon_buttons(self) -> None:
+        """Refresca el tinte de todos los botones-icono registrados."""
+        for btn in getattr(self, "_icon_buttons", []):
+            self._refresh_icon_button(btn)
+
+    def _register_tab_icon(self, index: int, icon_name: str) -> None:
+        """Asocia un icono temático a una pestaña del tab_widget y lo aplica."""
+        if not hasattr(self, "_tab_icon_names"):
+            self._tab_icon_names: Dict[int, str] = {}
+        self._tab_icon_names[index] = icon_name
+        self._refresh_tab_icon(index, icon_name)
+
+    def _refresh_tab_icon(self, index: int, icon_name: str) -> None:
+        if not ICONS_AVAILABLE or not self.tab_widget:
+            return
+        color = self.get_theme_colors().get("text_secondary", "#A0A0A0")
+        path = resolve_icon_path(icon_name)
+        if path:
+            icon = build_strip_icon(path, color, QSize(16, 16))
+            if not icon.isNull():
+                self.tab_widget.setTabIcon(index, icon)
+
+    def _refresh_all_tab_icons(self) -> None:
+        """Refresca el tinte de todos los iconos de pestañas registrados."""
+        for index, icon_name in getattr(self, "_tab_icon_names", {}).items():
+            self._refresh_tab_icon(index, icon_name)
+
     def create_button_row(self, buttons: List[Tuple[str, Callable, str]]) -> QHBoxLayout:
         """
 
@@ -365,6 +478,19 @@ class BasePanel(QWidget):
                 background: {c['surface_hover']};
                 color: {c['text_primary']};
             }}
+            QPushButton#scrapelioIconBtn {{
+                background: {c['surface_1']};
+                border: 1px solid {c['border']};
+                border-radius: 6px;
+                padding: 0px;
+            }}
+            QPushButton#scrapelioIconBtn:hover {{
+                background: {c['surface_hover']};
+                border-color: {c['accent']};
+            }}
+            QPushButton#scrapelioIconBtn:pressed {{
+                background: {c['selected']};
+            }}
             QLineEdit, QTextEdit, QComboBox {{
                 background: {c['input_bg']};
                 color: {c['text_primary']};
@@ -406,6 +532,8 @@ class BasePanel(QWidget):
         """Handle theme change signal. Child classes can override."""
         self.current_theme = theme_name
         self._apply_base_theme()
+        self._refresh_all_icon_buttons()
+        self._refresh_all_tab_icons()
     # ── API pública de estilo ─────────────────────────────────────────────────
 
     def set_title(self, text: str) -> None:

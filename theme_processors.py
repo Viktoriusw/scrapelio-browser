@@ -5,6 +5,18 @@ Permite personalización granular de estilos por módulo
 """
 
 import os
+import shutil as _sh
+import tempfile as _tf
+
+# Qt QSS url() no tolera espacios ni %20 en rutas de archivo.
+# Copiamos el SVG a /tmp (sin espacios) una sola vez al importar el módulo.
+_src_svg = os.path.abspath(os.path.join(os.path.dirname(__file__), "icons", "tab_close.svg"))
+_tmp_svg = os.path.join(_tf.gettempdir(), "scrapelio_tab_close.svg")
+try:
+    _sh.copy2(_src_svg, _tmp_svg)
+    _CLOSE_ICON_PATH = "file:///" + _tmp_svg.replace("\\", "/").lstrip("/")
+except Exception:
+    _CLOSE_ICON_PATH = ""
 
 def browser_theme_processor(theme_data: dict) -> str:
     """
@@ -20,9 +32,7 @@ def browser_theme_processor(theme_data: dict) -> str:
     spacing = theme_data.get("spacing", {})
     borders = theme_data.get("borders", {})
 
-    # Generar ruta absoluta para el icono de cierre
-    close_icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "icons", "cross.png"))
-    close_icon_path = close_icon_path.replace("\\", "/")  # Qt QSS necesita / incluso en Windows
+    close_icon_path = _CLOSE_ICON_PATH
 
     return f"""
     /* === ESTILOS ESPECÍFICOS DEL NAVEGADOR === */
@@ -47,40 +57,50 @@ def browser_theme_processor(theme_data: dict) -> str:
         border-color: {colors.get('accent', '#0078d4')};
     }}
 
-    /* Tabs del navegador */
-    #browserTabs QTabBar::tab {{
-        background-color: {colors.get('background', '#f0f0f0')};
+    /* Tabs del navegador — compactas, estilo Firefox.
+       Se apunta tanto al QTabBar interno (#browserTabs QTabBar) como a la barra
+       reparentada por su id propio (QTabBar#browserTabBar), porque al moverla
+       fuera del QTabWidget el selector de descendiente deja de alcanzarla. */
+    #browserTabs QTabBar::tab,
+    QTabBar#browserTabBar::tab {{
+        background-color: transparent;
         color: {colors.get('secondary', '#666666')};
-        padding: {spacing.get('md', '8px')} {spacing.get('lg', '12px')};
-        border-top-left-radius: {borders.get('radius', '4px')};
-        border-top-right-radius: {borders.get('radius', '4px')};
-        margin-right: 2px;
-        min-width: 120px;
+        padding: 0px 8px;
+        height: 26px;
+        border-radius: 5px;
+        margin: 2px 1px 0px 1px;
+        min-width: 64px;
         max-width: 200px;
+        font-size: 12px;
     }}
 
-    #browserTabs QTabBar::tab:selected {{
+    #browserTabs QTabBar::tab:selected,
+    QTabBar#browserTabBar::tab:selected {{
         background-color: {colors.get('surface', '#ffffff')};
         color: {colors.get('primary', '#000000')};
-        border-bottom: 2px solid {colors.get('accent', '#0078d4')};
     }}
 
-    #browserTabs QTabBar::tab:hover:!selected {{
+    #browserTabs QTabBar::tab:hover:!selected,
+    QTabBar#browserTabBar::tab:hover:!selected {{
         background-color: {colors.get('hover', '#f0f0f0')};
+        color: {colors.get('primary', '#000000')};
     }}
 
-    #browserTabs QTabBar::close-button {{
+    #browserTabs QTabBar::close-button,
+    QTabBar#browserTabBar::close-button {{
         image: url("{close_icon_path}");
-        width: 16px;
-        height: 16px;
+        width: 20px;
+        height: 20px;
         background-color: transparent;
-        border-radius: 2px;
-        margin: 2px;
+        border-radius: 5px;
+        margin: 1px 6px 1px 1px;
         subcontrol-position: right;
     }}
 
-    #browserTabs QTabBar::close-button:hover {{
-        background-color: {colors.get('error', '#d13438')}33;
+    #browserTabs QTabBar::close-button:hover,
+    QTabBar#browserTabBar::close-button:hover {{
+        background-color: rgba(255,255,255,0.16);
+        border-radius: 5px;
     }}
     """
 

@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+import os as _os
+import shutil as _sh
+import tempfile as _tf
+
+# Qt QSS url() no tolera espacios ni %20 en rutas de archivo.
+# Copiamos el SVG a /tmp (sin espacios) y usamos esa ruta.
+_src_svg = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "icons", "tab_close.svg"))
+_tmp_svg = _os.path.join(_tf.gettempdir(), "scrapelio_tab_close.svg")
+try:
+    _sh.copy2(_src_svg, _tmp_svg)
+    _TAB_CLOSE_SVG = "file:///" + _tmp_svg.replace("\\", "/").lstrip("/")
+except Exception:
+    _TAB_CLOSE_SVG = ""
+
 """
 Modern Theme Styles — Sistema de diseño unificado (Arc/Brave-inspired)
 
@@ -215,13 +229,13 @@ def get_trapezoidal_tab_style(theme_colors: dict) -> str:
             background: transparent;
             color: {text_sec};
             border: none;
-            border-radius: 6px;
-            padding: 0px 10px;
-            height: 30px;
-            margin: 2px 1px;
+            border-radius: 5px;
+            padding: 0px 8px;
+            height: 26px;
+            margin: 2px 1px 0px 1px;
             font-size: 12px;
-            min-width: 80px;
-            max-width: 220px;
+            min-width: 64px;
+            max-width: 200px;
         }}
 
         QTabBar::tab:hover:!selected {{
@@ -236,16 +250,17 @@ def get_trapezoidal_tab_style(theme_colors: dict) -> str:
         }}
 
         QTabBar::close-button {{
-            image: url(icons/cross.png);
+            image: url("{_TAB_CLOSE_SVG}");
             subcontrol-position: right;
-            margin: 2px;
-            border-radius: 3px;
-            width: 16px;
-            height: 16px;
+            margin: 1px 6px 1px 1px;
+            border-radius: 5px;
+            width: 20px;
+            height: 20px;
         }}
 
         QTabBar::close-button:hover {{
-            background: rgba(248,81,73,0.20);
+            background: rgba(255,255,255,0.16);
+            border-radius: 5px;
         }}
 
         QTabBar::scroller {{

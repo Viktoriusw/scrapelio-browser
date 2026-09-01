@@ -1,0 +1,102 @@
+{
+    "id": "seo_analyzer",
+    "name": "SEO Analyzer Pro",
+    "description": "Professional-grade SEO auditing tool with comprehensive analysis, tiered features, and advanced reporting capabilities",
+    "version": "1.0.0",
+    "author": "Scrapelio Team",
+    "category": "seo_marketing",
+    "tags": ["seo", "analysis", "audit", "optimization", "marketing", "analytics"],
+    "price": 19.99,
+    "currency": "USD",
+    "billing_cycle": "monthly",
+    "trial_days": 14,
+    "features": [
+        "Análisis completo de meta tags y estructura SEO",
+        "Análisis de jerarquía de encabezados (H1-H6)",
+        "Optimización de imágenes y alt text",
+        "Análisis de enlaces internos y externos",
+        "Evaluación de rendimiento y Core Web Vitals",
+        "Análisis de datos estructurados (Schema.org)",
+        "Auditoría de accesibilidad (WCAG)",
+        "Sistema de puntuación SEO (0-100)",
+        "Exportación a JSON, CSV y PDF",
+        "Historial de análisis y comparaciones",
+        "Análisis por niveles (FREE, PRO, ENTERPRISE)"
+    ],
+    "tiers": {
+        "free": {
+            "name": "FREE",
+            "price": 0.00,
+            "daily_analyses": 10,
+            "features": [
+                "Análisis básicos (meta, encabezados, imágenes, enlaces)",
+                "Exportación JSON",
+                "Puntuación SEO general"
+            ]
+        },
+        "professional": {
+            "name": "PROFESSIONAL",
+            "price": 19.99,
+            "daily_analyses": -1,
+            "features": [
+                "Todas las características FREE",
+                "Análisis ilimitados",
+                "Análisis de rendimiento y Core Web Vitals",
+                "Análisis de Schema.org",
+                "Auditoría de accesibilidad",
+                "Exportación CSV y PDF",
+                "Historial de análisis",
+                "Análisis de competidores (hasta 3)",
+                "Seguimiento de palabras clave (hasta 50)"
+            ]
+        },
+        "enterprise": {
+            "name": "ENTERPRISE",
+            "price": 49.99,
+            "daily_analyses": -1,
+            "features": [
+                "Todas las características PROFESSIONAL",
+                "Generación de contenido con IA",
+                "Optimización de meta tags con GPT",
+                "Investigación de palabras clave con NLP",
+                "Análisis de calidad de contenido",
+                "Monitoreo de SERP",
+                "Rastreador de sitios (hasta 10,000 URLs)",
+                "Análisis masivo de URLs",
+                "Gestor de pruebas A/B",
+                "Alertas personalizadas",
+                "Integraciones webhook",
+                "Acceso API",
+                "Reportes con marca blanca",
+                "Soporte prioritario"
+            ]
+        }
+    },
+    "dependencies": [
+        "beautifulsoup4>=4.11.0",
+        "lxml>=4.9.0",
+        "requests>=2.28.0",
+        "pandas>=1.5.0",
+        "numpy>=1.24.0",
+        "textstat>=0.7.3"
+    ],
+    "compatibility": ">=1.0.0",
+    "premium": true,
+    "icon": "🔍",
+    "screenshots": [],
+    "changelog": {
+        "1.0.0": "Versión inicial con análisis completo de SEO, sistema de niveles y exportación avanzada"
+    },
+    "permissions": [
+        "web_access",
+        "html_analysis",
+        "file_export",
+        "storage"
+    ],
+    "support": {
+        "email": "support@scrapelio.com",
+        "docs": "https://docs.scrapelio.com/plugins/seo-analyzer",
+        "priority": "enterprise_only"
+    }
+}
+

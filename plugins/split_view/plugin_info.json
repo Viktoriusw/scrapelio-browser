@@ -1,0 +1,35 @@
+{
+  "id": "split_view",
+  "name": "Split View",
+  "description": "Vista dividida que permite mantener una página web visible mientras navegas en otras pestañas. Click en la vista para controlarla con los botones de navegación.",
+  "version": "2.1.0",
+  "author": "Scrapelio Team",
+  "category": "productivity",
+  "tags": ["split", "view", "productivity", "multitasking"],
+  "price": 0,
+  "currency": "USD",
+  "billing_cycle": "free",
+  "trial_days": 0,
+  "features": [
+    "Vista web secundaria independiente",
+    "Integración completa con barra de navegación",
+    "Redimensionable con splitter",
+    "Persistencia de URL",
+    "Panel de configuración",
+    "Toggle desde sidebar"
+  ],
+  "dependencies": [],
+  "compatibility": ">=1.0.0",
+  "premium": false,
+  "icon": "⫿",
+  "screenshots": [],
+  "permissions": ["toolbar", "ui_modification"],
+  "min_browser_version": "1.0.0",
+  "max_browser_version": "999.0.0",
+  "changelog": {
+    "2.1.0": "Integración mejorada con controles de navegación",
+    "2.0.0": "Rediseño completo con manejo de focus",
+    "1.0.0": "Versión inicial"
+  }
+}
+

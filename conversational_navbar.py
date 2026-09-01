@@ -269,20 +269,8 @@ class ConversationalNavBar(QLineEdit):
 
         self.textChanged.connect(self._on_text_changed)
 
-        self.setStyleSheet("""
-            QLineEdit#conversationalNavBar {
-                background: #1e1e2e;
-                color: #e0e0e0;
-                border: 1px solid #333;
-                border-radius: 18px;
-                padding: 4px 16px;
-                font-size: 14px;
-                selection-background-color: #0f3460;
-            }
-            QLineEdit#conversationalNavBar:focus {
-                border: 1px solid #0f3460;
-            }
-        """)
+        # Sin stylesheet hardcodeado — el estilo lo aplica ui.py via _refresh_url_bar_style()
+        # para que respete el tema activo y sea editable desde el plugin de temas.
     # ── Eventos ──────────────────────────────────────────────────────────────
 
     def keyPressEvent(self, event: QKeyEvent) -> None:

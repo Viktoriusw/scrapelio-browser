@@ -652,13 +652,9 @@ class BackendIntegration(QObject):
         # Validar entrada
 
         if not email or not password:
-            return BackendResponse(False, error=BackendError.AUTHENTICATION_ERROR, 
+            return BackendResponse(False, error=BackendError.AUTHENTICATION_ERROR,
 
-                                message="Email and password are required")
-        if "@" not in email:
-            return BackendResponse(False, error=BackendError.AUTHENTICATION_ERROR, 
-
-                                message="Invalid email format")
+                                message="User ID and password are required")
         # Verificar conectividad
 
         if not self.is_connected:

@@ -40,11 +40,15 @@ import requests
 
 import re
 
+import logging
+
 from dataclasses import dataclass
 
 from typing import Optional, Pattern, Set
 
 from collections import OrderedDict
+
+logger = logging.getLogger(__name__)
 
 
 # Importar configuración de rendimiento desde constantes centralizadas
@@ -312,6 +316,20 @@ class AdBlockerInterceptor(QWebEngineUrlRequestInterceptor):
 
                 first_party_host = info.firstPartyUrl().host().lower()
 
+                # Sin URL de primer party (p. ej. transición): intentar initiator (Qt 6.2+)
+
+                if not first_party_host and hasattr(info, "initiator"):
+                    try:
+                        initiator = info.initiator()
+                        if initiator is not None and initiator.isValid():
+                            first_party_host = initiator.host().lower()
+                    except (AttributeError, TypeError, RuntimeError):
+                        pass
+                if not request_host:
+                    return None
+                if not first_party_host:
+                    return None
+
                 # Simplificación: comparar hosts directamente
 
                 # En implementación real se usaría public suffix list
@@ -358,9 +376,18 @@ class AdBlockerInterceptor(QWebEngineUrlRequestInterceptor):
             # Cargar filtros pesados en segundo plano si no están deshabilitados
 
             if not PERFORMANCE_CONFIG.get("skip_heavy_filters", False) and not PERFORMANCE_CONFIG.get("disable_heavy_filters", False):
+                print(
+                    "[Adblock] Iniciando carga en segundo plano de EasyList/EasyPrivacy "
+                    "(si existen easylist.txt / easyprivacy.txt en el directorio de trabajo)"
+                )
+                logger.debug("Adblock: hilo load_heavy_filters iniciado")
                 threading.Thread(target=self.load_heavy_filters, daemon=True).start()
             else:
                 print("Heavy filters disabled for performance")
+                logger.warning(
+                    "Adblock: listas pesadas desactivadas (skip_heavy/disable_heavy); "
+                    "solo reglas de custom_filters.txt"
+                )
         except Exception as e:
             print(f"Error al cargar filtros básicos: {str(e)}")
 
@@ -410,8 +437,13 @@ class AdBlockerInterceptor(QWebEngineUrlRequestInterceptor):
 
                 self._host_index.update(host_index)
             print(f"Filtros pesados cargados: {len(block_rules)} bloqueos adicionales")
+            logger.info(
+                "Adblock: filtros pesados compilados (%s reglas de bloqueo nuevas)",
+                len(block_rules),
+            )
         except Exception as e:
             print(f"Error al cargar filtros pesados: {str(e)}")
+            logger.error("Adblock: error en load_heavy_filters: %s", e)
     def load_filter_lists(self):
         """Carga las listas de filtros desde archivos locales"""
 
@@ -629,11 +661,11 @@ class AdBlockerInterceptor(QWebEngineUrlRequestInterceptor):
         if rule.exclude_domains:
             if any(host.endswith(d) for d in rule.exclude_domains):
                 return False
-        # Verificar third-party
+        # Verificar third-party (solo si Qt pudo determinar 1p vs 3p).
+        # Antes: is_tp None hacía fallar todas las reglas $third-party → pasaba
+        # doubleclick, pubmatic, etc. aunque EasyList estuviera cargada.
 
-        if rule.third_party is not None:
-            if is_tp is None:
-                return False  # No se puede determinar, skip regla
+        if rule.third_party is not None and is_tp is not None:
             if rule.third_party != is_tp:
                 return False
         # Verificar tipos de recurso
@@ -662,82 +694,108 @@ class AdBlockerInterceptor(QWebEngineUrlRequestInterceptor):
         'newassets.hcaptcha.com',
     )
 
+    # Extensiones de URLs de streaming — nunca deben bloquearse independientemente del CDN
+    _MEDIA_EXTENSIONS = ('.m3u8', '.mpd', '.m4s', '.ts', '.mp4', '.webm', '.m4v', '.mp3', '.ogg')
+
+    def _evaluate_ad_block(self, info) -> bool:
+        """True si la petición debe bloquearse por reglas ABP (sin llamar a info.block)."""
+        from PySide6.QtWebEngineCore import QWebEngineUrlRequestInfo as _QWERI
+
+        # Nunca bloquear recursos de tipo Media (vídeo/audio).
+        # Los nombres de ResourceType en PySide6 6.x llevan el prefijo 'ResourceType'.
+        rt = info.resourceType()
+        if rt == _QWERI.ResourceType.ResourceTypeMedia:
+            return False
+
+        url = info.requestUrl().toString()
+
+        # Tampoco bloquear XHR/Fetch que sean manifiestos o segmentos de streaming
+        if rt == _QWERI.ResourceType.ResourceTypeXhr:
+            url_lower = url.lower()
+            if any(url_lower.endswith(ext) or (ext + '?') in url_lower
+                   for ext in self._MEDIA_EXTENSIONS):
+                return False
+
+        host = info.requestUrl().host().lower()
+        for wl_domain in self._CAPTCHA_WHITELIST:
+            if host == wl_domain or host.endswith('.' + wl_domain):
+                return False
+        cache_key = f"{host}:{url[-50:]}"
+        if cache_key in self._lru:
+            return bool(self._lru[cache_key])
+        is_tp = self.is_third_party(info)
+        with self._lock:
+            exception_rules = self.exception_rules[:]
+            block_rules = self.block_rules[:]
+            host_index = self._host_index.copy()
+        for rule in exception_rules:
+            if self._rule_matches(rule, url, host, is_tp, info):
+                self._manage_lru_cache(cache_key, False)
+                return False
+        matched_rules = []
+        for suffix in host_index:
+            if host.endswith(suffix):
+                matched_rules.extend(host_index[suffix])
+        for rule in matched_rules:
+            if rule.block and self._rule_matches(rule, url, host, is_tp, info):
+                self._manage_lru_cache(cache_key, True)
+                print(f"Blocked by ABP rule: {host}")
+                logger.debug("Adblock: bloqueado por sufijo host=%s", host)
+                return True
+        for rule in block_rules:
+            if rule.regex and not rule.host_suffixes:
+                if self._rule_matches(rule, url, host, is_tp, info):
+                    self._manage_lru_cache(cache_key, True)
+                    print(f"Blocked by regex rule: {url}")
+                    logger.debug("Adblock: bloqueado por regex url=%s", url[:120])
+                    return True
+        self._manage_lru_cache(cache_key, False)
+        return False
+
     def interceptRequest(self, info):
         """Intercepta y bloquea solicitudes usando filtros ABP"""
-
         try:
-            url = info.requestUrl().toString()
-
-            host = info.requestUrl().host().lower()
-
-            # Whitelist: dominios de CAPTCHA/verificación nunca se bloquean
-            for wl_domain in self._CAPTCHA_WHITELIST:
-                if host == wl_domain or host.endswith('.' + wl_domain):
-                    return
-            # Verificar cache LRU
-
-            cache_key = f"{host}:{url[-50:]}"  # Key optimizado
-
-            if cache_key in self._lru:
-                decision = self._lru[cache_key]
-
-                if decision:
-                    info.block(True)
-                return
-            # Calcular propiedades una vez
-
-            is_tp = self.is_third_party(info)
-
-            # Obtener reglas bajo lock (lectura rápida)
-
-            with self._lock:
-                exception_rules = self.exception_rules[:]
-
-                block_rules = self.block_rules[:]
-
-                host_index = self._host_index.copy()
-            # Verificar excepciones primero
-
-            for rule in exception_rules:
-                if self._rule_matches(rule, url, host, is_tp, info):
-                    self._manage_lru_cache(cache_key, False)
-
-                    return  # Permitir
-            # Verificar reglas de bloqueo indexadas por host
-
-            matched_rules = []
-
-            for suffix in host_index:
-                if host.endswith(suffix):
-                    matched_rules.extend(host_index[suffix])
-            # Verificar reglas específicas del host primero
-
-            for rule in matched_rules:
-                if rule.block and self._rule_matches(rule, url, host, is_tp, info):
-                    info.block(True)
-
-                    self._manage_lru_cache(cache_key, True)
-
-                    print(f"Blocked by ABP rule: {host}")
-
-                    return
-            # Verificar reglas globales (regex) como fallback
-
-            for rule in block_rules:
-                if rule.regex and not rule.host_suffixes:  # Solo regex globales
-                    if self._rule_matches(rule, url, host, is_tp, info):
-                        info.block(True)
-
-                        self._manage_lru_cache(cache_key, True)
-
-                        print(f"Blocked by regex rule: {url}")
-
-                        return
-            # No bloqueado
-
-            self._manage_lru_cache(cache_key, False)
+            if self._evaluate_ad_block(info):
+                info.block(True)
         except Exception as e:
             print(f"Error en interceptRequest: {str(e)}")
+            logger.exception("Adblock: error en interceptRequest")
+
+
+class CombinedUrlRequestInterceptor(QWebEngineUrlRequestInterceptor):
+    """Encadena evaluación ABP y NetworkInterceptor (UA, DNT, patrones SQLite).
+
+    Qt solo permite un QWebEngineUrlRequestInterceptor por perfil; sin esta clase,
+    al activar Block Ads se sustituía el interceptor y se perdía el UA; o al revés,
+    las pestañas nuevas solo instalaban NetworkInterceptor y el adblock no corría.
+    """
+
+    def __init__(
+        self,
+        ad_blocker: AdBlockerInterceptor,
+        network_interceptor,
+        *,
+        block_ads: bool,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._ad_blocker = ad_blocker
+        self._network = network_interceptor
+        self._block_ads = block_ads
+
+    def interceptRequest(self, info):
+        try:
+            if (
+                self._block_ads
+                and self._ad_blocker is not None
+                and self._ad_blocker._evaluate_ad_block(info)
+            ):
+                info.block(True)
+                return
+            if self._network is not None:
+                self._network.interceptRequest(info)
+        except Exception as exc:
+            logger.exception("CombinedUrlRequestInterceptor: %s", exc)
 
 
 class PrivacySettings:
@@ -766,7 +824,7 @@ class PrivacySettings:
 
             "block_fingerprinting": True,
 
-            "block_third_party": True,  # Para cookies de terceros específicamente
+            "block_third_party": False,  # False: los CDNs de vídeo necesitan cookies de terceros
 
             "clear_on_exit": True,
 
@@ -1828,12 +1886,20 @@ class PrivacyManager(QWidget):
 
         current_level = self.settings.get_setting("privacy_level")
 
-        self.privacy_combo.setCurrentText(current_level.capitalize())
+        self.privacy_combo.blockSignals(True)
+        try:
+            self.privacy_combo.setCurrentText(current_level.capitalize())
+        finally:
+            self.privacy_combo.blockSignals(False)
 
-        # Actualizar checkboxes
-
-        for key, check in self.feature_checks.items():
-            check.setChecked(bool(self.settings.get_setting(key)))
+        for check in self.feature_checks.values():
+            check.blockSignals(True)
+        try:
+            for key, check in self.feature_checks.items():
+                check.setChecked(bool(self.settings.get_setting(key)))
+        finally:
+            for check in self.feature_checks.values():
+                check.blockSignals(False)
     def on_privacy_level_changed(self, level):
         level = level.lower()
 
@@ -1851,13 +1917,16 @@ class PrivacyManager(QWidget):
 
         self.settings_changed.emit()
     def apply_strict_privacy(self):
-        for key, check in self.feature_checks.items():
-            check.setChecked(True)
-
-            self.settings.set_setting(key, True)
-        # Emitir señal para aplicar cambios al vuelo
-
-        self.settings_changed.emit()
+        for check in self.feature_checks.values():
+            check.blockSignals(True)
+        try:
+            for key, check in self.feature_checks.items():
+                check.setChecked(True)
+                self.settings.set_setting(key, True)
+        finally:
+            for check in self.feature_checks.values():
+                check.blockSignals(False)
+        # settings_changed lo emite on_privacy_level_changed (evita doble recarga)
     def apply_balanced_privacy(self):
         balanced_settings = {
 
@@ -1875,20 +1944,26 @@ class PrivacyManager(QWidget):
 
             "block_fingerprinting": True,
 
-            "block_third_party": True,
+            "block_third_party": False,  # False: los CDNs de vídeo necesitan cookies de terceros
 
             "clear_on_exit": True,
 
             "do_not_track": True
         }
 
-        for key, value in balanced_settings.items():
-            self.feature_checks[key].setChecked(bool(value))
-
-            self.settings.set_setting(key, value)
-        # Emitir señal para aplicar cambios al vuelo
-
-        self.settings_changed.emit()
+        for check in self.feature_checks.values():
+            check.blockSignals(True)
+        try:
+            for key, value in balanced_settings.items():
+                self.feature_checks[key].setChecked(bool(value))
+                self.settings.set_setting(key, value)
+            for key, check in self.feature_checks.items():
+                if key not in balanced_settings:
+                    self.settings.set_setting(key, check.isChecked())
+        finally:
+            for check in self.feature_checks.values():
+                check.blockSignals(False)
+        # settings_changed lo emite on_privacy_level_changed
     def on_feature_changed(self):
         # Actualizar configuración cuando cambia cualquier feature
 
@@ -2555,6 +2630,365 @@ class PrivacyManager(QWidget):
             print("Script de YouTube AdBlock instalado")
         except Exception as e:
             print(f"Error instalando script de YouTube: {e}")
+
+    def install_stealth_script(self, profile: QWebEngineProfile) -> None:
+        """Inyecta JavaScript anti-detección en el perfil del navegador.
+
+        Se ejecuta en MainWorld (mismo contexto que la página) en DocumentCreation
+        para ocultar las señales de automatización antes de que el sitio las lea.
+        Corrige: navigator.webdriver, window.chrome, plugins vacíos, dimensiones
+        de ventana y propiedades residuales de Selenium/WebDriver.
+        """
+        try:
+            scripts = profile.scripts()
+
+            _STEALTH_SCRIPT_NAME = "scrapelio-stealth"
+
+            js_code = r"""
+(function () {
+    'use strict';
+
+    // 1. navigator.webdriver → undefined
+    try {
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+            configurable: true
+        });
+    } catch (e) {}
+
+    // 2. Restaurar window.chrome (ausente en Chromium embebido)
+    if (!window.chrome) {
+        try {
+            Object.defineProperty(window, 'chrome', {
+                value: {
+                    app: {
+                        isInstalled: false,
+                        InstallState: {
+                            DISABLED: 'disabled',
+                            INSTALLED: 'installed',
+                            NOT_INSTALLED: 'not_installed'
+                        },
+                        RunningState: {
+                            CANNOT_RUN: 'cannot_run',
+                            READY_TO_RUN: 'ready_to_run',
+                            RUNNING: 'running'
+                        }
+                    },
+                    runtime: {
+                        OnInstalledReason: {
+                            CHROME_UPDATE: 'chrome_update',
+                            INSTALL: 'install',
+                            SHARED_MODULE_UPDATE: 'shared_module_update',
+                            UPDATE: 'update'
+                        },
+                        OnRestartRequiredReason: {
+                            APP_UPDATE: 'app_update',
+                            OS_UPDATE: 'os_update',
+                            PERIODIC: 'periodic'
+                        },
+                        PlatformArch: {
+                            ARM: 'arm', ARM64: 'arm64',
+                            MIPS: 'mips', MIPS64: 'mips64',
+                            X86_32: 'x86-32', X86_64: 'x86-64'
+                        },
+                        PlatformOs: {
+                            ANDROID: 'android', CROS: 'cros', LINUX: 'linux',
+                            MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'
+                        },
+                        id: undefined
+                    },
+                    loadTimes: function () { return {}; },
+                    csi: function () { return {}; }
+                },
+                writable: false,
+                configurable: true  // true: permite que el Cast SDK añada chrome.cast
+            });
+        } catch (e) {}
+    }
+
+    // 3. navigator.plugins — array vacío delata modo headless
+    try {
+        if (navigator.plugins.length === 0) {
+            const fakeMimeType = {
+                type: 'application/pdf',
+                suffixes: 'pdf',
+                description: 'Portable Document Format',
+                enabledPlugin: null
+            };
+            const fakePlugin = {
+                0: fakeMimeType,
+                name: 'PDF Viewer',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format',
+                length: 1,
+                item: (i) => i === 0 ? fakeMimeType : undefined,
+                namedItem: (n) => n === 'application/pdf' ? fakeMimeType : undefined,
+                [Symbol.iterator]: function* () { yield fakeMimeType; }
+            };
+            const fakePlugins = [
+                fakePlugin,
+                Object.assign({}, fakePlugin, { name: 'Chrome PDF Viewer' }),
+                Object.assign({}, fakePlugin, { name: 'Chromium PDF Viewer' })
+            ];
+            fakePlugins.length = 3;
+            fakePlugins.item = (i) => fakePlugins[i] || undefined;
+            fakePlugins.namedItem = (n) => fakePlugins.find(p => p.name === n) || undefined;
+            fakePlugins.refresh = function () {};
+            fakePlugins[Symbol.iterator] = Array.prototype[Symbol.iterator];
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => fakePlugins,
+                configurable: true
+            });
+        }
+    } catch (e) {}
+
+    // 4. navigator.languages — vacío o incorrecto delata automatización
+    try {
+        if (!navigator.languages || navigator.languages.length === 0) {
+            Object.defineProperty(navigator, 'languages', {
+                get: () => Object.freeze(['es-ES', 'es', 'en-US', 'en']),
+                configurable: true
+            });
+        }
+    } catch (e) {}
+
+    // 5. Permisos — el stub de Chromium sin cabeza responde 'denied' a notificaciones
+    try {
+        if (navigator.permissions && navigator.permissions.query) {
+            const _origQuery = navigator.permissions.query.bind(navigator.permissions);
+            navigator.permissions.query = function (parameters) {
+                if (parameters && parameters.name === 'notifications') {
+                    return Promise.resolve({ state: 'default', onchange: null });
+                }
+                return _origQuery(parameters);
+            };
+        }
+    } catch (e) {}
+
+    // 6. Dimensiones de ventana — 0x0 delata modo headless
+    try {
+        if (window.outerWidth === 0) {
+            Object.defineProperty(window, 'outerWidth', {
+                get: () => window.innerWidth || 1280,
+                configurable: true
+            });
+        }
+        if (window.outerHeight === 0) {
+            Object.defineProperty(window, 'outerHeight', {
+                get: () => (window.innerHeight || 720) + 80,
+                configurable: true
+            });
+        }
+    } catch (e) {}
+
+    // 7. Eliminar artefactos de Selenium / WebDriver del objeto window
+    const _seleniumProps = [
+        '$cdc_asdjflasutopfhvcZLmcfl_', '_selenium', 'calledSelenium',
+        '_Selenium_IDE_Recorder', 'fxdriver_id', '_fxdriver_unwrapped',
+        '__webdriver_script_fn', '__driver_evaluate', '__webdriver_evaluate',
+        '__selenium_evaluate', '__fxdriver_evaluate', '__driver_unwrapped',
+        '__webdriver_unwrapped', '__selenium_unwrapped', '__fxdriver_unwrapped',
+        '_WEBDRIVER_ELEM_CACHE', 'ChromeDriverw', '__webdriverFunc',
+        '__webdriver_script_fn', '__webdriver_script_func',
+        '__$webdriverAsyncExecutor', '$chrome_asyncScriptInfo'
+    ];
+    _seleniumProps.forEach(function (p) {
+        try { delete window[p]; } catch (e) {}
+    });
+
+    // 8. Google Cast API — stub protegido con getter/setter
+    //    PROBLEMA: el Cast SDK de gstatic.com carga después del stealth script y
+    //    reemplaza window.cast con su propio objeto (sin framework). Usar
+    //    Object.defineProperty con setter intercepta esa asignación e inyecta
+    //    nuestros stubs en el nuevo objeto antes de que los scripts del sitio lo lean.
+    (function () {
+        var _noop = function () {};
+        var _noopCtx = {
+            setOptions: _noop, addEventListener: _noop,
+            removeEventListener: _noop,
+            getCurrentSession: function () { return null; },
+            getCastState: function () { return 'NO_DEVICES_AVAILABLE'; },
+            getSessionObj: function () { return null; }
+        };
+        var _castFw = {
+            VERSION: '1.0.0',
+            AutoJoinPolicy: {
+                CUSTOM_CONTROLLER_SCOPED: 'custom_controller_scoped',
+                TAB_AND_ORIGIN_SCOPED: 'tab_and_origin_scoped',
+                ORIGIN_SCOPED: 'origin_scoped',
+                PAGE_SCOPED: 'page_scoped'
+            },
+            DefaultActionPolicy: {
+                CREATE_SESSION: 'create_session',
+                CAST_THIS_TAB: 'cast_this_tab'
+            },
+            LoggerLevel: { DEBUG: 0, INFO: 800, WARNING: 900, ERROR: 1000, NONE: 1500 },
+            CastContext: { getInstance: function () { return _noopCtx; } },
+            RemotePlayer: function () {
+                this.isConnected = false; this.isMuted = false; this.isPaused = false;
+                this.volumeLevel = 1; this.currentTime = 0; this.duration = 0;
+                this.displayStatus = ''; this.displayName = ''; this.mediaInfo = null;
+                this.imageUrl = null; this.playerState = null; this.title = '';
+            },
+            RemotePlayerController: function () {
+                this.addEventListener = _noop; this.removeEventListener = _noop;
+                this.playOrPause = _noop; this.stop = _noop; this.seek = _noop;
+                this.muteOrUnmute = _noop; this.setVolumeLevel = _noop;
+            },
+            RemotePlayerEventType: {
+                IS_CONNECTED_CHANGED: 'isConnectedChanged',
+                IS_MEDIA_LOADED_CHANGED: 'isMediaLoadedChanged',
+                DURATION_CHANGED: 'durationChanged',
+                CURRENT_TIME_CHANGED: 'currentTimeChanged',
+                IS_PAUSED_CHANGED: 'isPausedChanged',
+                VOLUME_LEVEL_CHANGED: 'volumeLevelChanged',
+                IS_MUTED_CHANGED: 'isMutedChanged',
+                DISPLAY_NAME_CHANGED: 'displayNameChanged',
+                STATUS_TEXT_CHANGED: 'statusTextChanged',
+                TITLE_CHANGED: 'titleChanged',
+                DISPLAY_STATUS_CHANGED: 'displayStatusChanged',
+                MEDIA_INFO_CHANGED: 'mediaInfoChanged',
+                IMAGE_URL_CHANGED: 'imageUrlChanged',
+                PLAYER_STATE_CHANGED: 'playerStateChanged'
+            },
+            CastState: {
+                NO_DEVICES_AVAILABLE: 'NO_DEVICES_AVAILABLE',
+                NOT_CONNECTED: 'NOT_CONNECTED',
+                CONNECTING: 'CONNECTING',
+                CONNECTED: 'CONNECTED'
+            },
+            SessionState: {
+                NO_SESSION: 'NO_SESSION',
+                SESSION_STARTING: 'SESSION_STARTING',
+                SESSION_STARTED: 'SESSION_STARTED',
+                SESSION_ENDING: 'SESSION_ENDING',
+                SESSION_ENDED: 'SESSION_ENDED',
+                SESSION_START_FAILED: 'SESSION_START_FAILED'
+            },
+            CastContextEventType: {
+                CAST_STATE_CHANGED: 'caststatechanged',
+                SESSION_STATE_CHANGED: 'sessionstatechanged'
+            }
+        };
+        var _castMedia = {
+            DEFAULT_MEDIA_RECEIVER_APP_ID: 'CC1AD845',
+            IdleReason: { CANCELLED: 'CANCELLED', INTERRUPTED: 'INTERRUPTED', FINISHED: 'FINISHED', ERROR: 'ERROR' },
+            PlayerState: { IDLE: 'IDLE', PLAYING: 'PLAYING', PAUSED: 'PAUSED', BUFFERING: 'BUFFERING' },
+            RepeatMode: { OFF: 'REPEAT_OFF', ALL: 'REPEAT_ALL', SINGLE: 'REPEAT_SINGLE', ALL_AND_SHUFFLE: 'REPEAT_ALL_AND_SHUFFLE' },
+            MediaInfo: function (url, mime) { this.contentId = url; this.contentType = mime; },
+            LoadRequest: function (mediaInfo) { this.media = mediaInfo; },
+            SeekRequest: function () {}
+        };
+
+        // _innerCast: objeto que siempre existe como window.cast
+        var _innerCast = { framework: _castFw, media: _castMedia };
+
+        try {
+            // El setter intercepta cualquier window.cast = newObj (incluido el Cast SDK)
+            // e inyecta nuestros stubs si el nuevo objeto no los tiene.
+            Object.defineProperty(window, 'cast', {
+                configurable: true,
+                enumerable: true,
+                get: function () { return _innerCast; },
+                set: function (val) {
+                    if (val && typeof val === 'object') {
+                        if (!val.framework || !val.framework.AutoJoinPolicy) {
+                            val.framework = _castFw;
+                        }
+                        if (!val.media) {
+                            val.media = _castMedia;
+                        }
+                        _innerCast = val;
+                    }
+                }
+            });
+        } catch (e) {}
+
+        // __onGCastApiAvailable: si el Cast SDK no carga o no lo llama, lo llamamos
+        // nosotros con false (sin Chromecast) para que los players no queden esperando.
+        var _gcaCalled = false;
+        window.addEventListener('load', function () {
+            setTimeout(function () {
+                if (!_gcaCalled && typeof window.__onGCastApiAvailable === 'function') {
+                    _gcaCalled = true;
+                    try { window.__onGCastApiAvailable(false); } catch (e) {}
+                }
+            }, 800);
+        });
+        // Envolver __onGCastApiAvailable para detectar si el SDK lo llama antes de load
+        try {
+            var _gcaOrig = null;
+            Object.defineProperty(window, '__onGCastApiAvailable', {
+                configurable: true,
+                enumerable: true,
+                get: function () { return _gcaOrig; },
+                set: function (fn) {
+                    _gcaOrig = typeof fn === 'function' ? function () {
+                        _gcaCalled = true;
+                        return fn.apply(this, arguments);
+                    } : fn;
+                }
+            });
+        } catch (e) {}
+    }());
+
+})();
+"""
+
+            # Eliminar versión anterior del script antes de insertar la nueva.
+            # find() devuelve QList[QWebEngineScript] en PySide6 6.11
+            for _existing in scripts.find(_STEALTH_SCRIPT_NAME):
+                scripts.remove(_existing)
+
+            script = QWebEngineScript()
+            script.setName(_STEALTH_SCRIPT_NAME)
+            script.setInjectionPoint(QWebEngineScript.DocumentCreation)
+            # MainWorld (0): mismo contexto JS que la página — indispensable para
+            # que los overrides de navigator sean visibles al código del sitio web.
+            script.setWorldId(QWebEngineScript.MainWorld)
+            script.setRunsOnSubFrames(True)
+            script.setSourceCode(js_code)
+            scripts.insert(script)
+            logger.debug("Stealth script instalado en perfil %s", profile.storageName())
+        except Exception as exc:
+            logger.warning("Error instalando stealth script: %s", exc)
+
+    def _apply_url_interceptor_to_profile(self, profile: QWebEngineProfile) -> None:
+        """Un único punto para instalar CombinedUrlRequestInterceptor o componentes sueltos."""
+        block_ads = bool(self.settings.get_setting("block_ads"))
+        network_interceptor = None
+        if self.parent is not None and hasattr(self.parent, "network_interceptor"):
+            network_interceptor = self.parent.network_interceptor
+        if block_ads:
+            if network_interceptor is not None:
+                profile.setUrlRequestInterceptor(
+                    CombinedUrlRequestInterceptor(
+                        self.ad_blocker,
+                        network_interceptor,
+                        block_ads=True,
+                        parent=self,
+                    )
+                )
+            else:
+                profile.setUrlRequestInterceptor(self.ad_blocker)
+        else:
+            if network_interceptor is not None:
+                profile.setUrlRequestInterceptor(network_interceptor)
+            else:
+                profile.setUrlRequestInterceptor(None)
+
+    def sync_default_webengine_profile(self) -> None:
+        """Mantiene defaultProfile alineado con pestañas (UA + adblock)."""
+        try:
+            prof = QWebEngineProfile.defaultProfile()
+            self._apply_url_interceptor_to_profile(prof)
+            logger.debug(
+                "Adblock: perfil por defecto de WebEngine actualizado (block_ads=%s)",
+                self.settings.get_setting("block_ads"),
+            )
+        except Exception as exc:
+            logger.warning("Adblock: sync_default_webengine_profile: %s", exc)
+
     def apply_privacy_settings(self, browser):
         """Aplica la configuración de privacidad al navegador"""
 
@@ -2562,27 +2996,20 @@ class PrivacyManager(QWidget):
             if browser and hasattr(browser, 'page'):
                 profile = browser.page().profile()
 
-                # Aplicar interceptor de anuncios solo si Block Ads está activado
+                self._apply_url_interceptor_to_profile(profile)
+
+                # Stealth anti-detección — siempre activo, independientemente de
+                # ad-blocking, para evitar que Google y otros detecten automatización.
+                self.install_stealth_script(profile)
 
                 if self.settings.get_setting("block_ads"):
-                    profile.setUrlRequestInterceptor(self.ad_blocker)
-
                     # Instalar script de YouTube para bloqueo adicional
-
                     self.install_youtube_script(profile)
                 else:
-                    profile.setUrlRequestInterceptor(None)
-
                     # Remover script de YouTube si existe
-
                     try:
-                        scripts = profile.scripts()
-
-                        # existing_script = scripts.findScript("yt-adblock")  # DESACTIVADO: método no existe en PySide6
-
-                        # if not existing_script.isNull():  # DESACTIVADO
-
-                            # scripts.remove(existing_script)  # DESACTIVADO
+                        _scripts = profile.scripts()
+                        _ = _scripts  # API remove limitada en PySide6
                     except Exception as e:
                         print(f"Error removiendo script de YouTube: {e}")
                 # Configurar permisos
@@ -2594,11 +3021,9 @@ class PrivacyManager(QWidget):
                 settings.setAttribute(QWebEngineSettings.JavascriptEnabled, 
 
                                    not self.settings.get_setting("block_javascript"))
-                # Fingerprinting/WebGL
-
-                settings.setAttribute(QWebEngineSettings.WebGLEnabled, 
-
-                                   not self.settings.get_setting("block_fingerprinting"))
+                # WebGL siempre activo — los reproductores de vídeo modernos lo necesitan.
+                # El anti-fingerprinting se aplica vía script JS, no deshabilitando WebGL.
+                settings.setAttribute(QWebEngineSettings.WebGLEnabled, True)
                 # Política de cookies persistentes (separada de third-party)
 
                 if self.settings.get_setting("no_persistent_cookies"):

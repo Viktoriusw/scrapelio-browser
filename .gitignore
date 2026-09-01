@@ -38,3 +38,11 @@ scrapelio.config.json
 .DS_Store
 Thumbs.db
 
+
+# Estado local / artefactos de instalación (añadido en el sync 2026-09)
+*.db.backup
+bookmarks.db.backup
+tab_groups.json
+tab_session.json
+.plugin_metadata.json
+plugin_backups/

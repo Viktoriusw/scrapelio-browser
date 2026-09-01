@@ -1,0 +1,32 @@
+{
+    "id": "proxy",
+    "name": "Proxy Management",
+    "description": "Gestión avanzada de proxies con rotación automática, validación y estadísticas de rendimiento",
+    "version": "1.0.0",
+    "author": "Scrapelio Team",
+    "category": "network",
+    "tags": ["proxy", "network", "privacy", "anonymity"],
+    "price": 7.99,
+    "currency": "USD",
+    "billing_cycle": "monthly",
+    "trial_days": 7,
+    "features": [
+        "Gestión de múltiples proxies",
+        "Rotación automática",
+        "Validación de proxies",
+        "Estadísticas de rendimiento",
+        "Soporte HTTP/HTTPS/SOCKS",
+        "Importación masiva de proxies"
+    ],
+    "dependencies": ["requests", "aiohttp"],
+    "compatibility": ">=1.0.0",
+    "premium": true,
+    "icon": "🌐",
+    "screenshots": [],
+    "changelog": {
+        "1.0.0": "Versión inicial con funcionalidad completa"
+    }
+}
+
+
+

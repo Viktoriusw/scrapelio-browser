@@ -1,0 +1,32 @@
+{
+    "id": "scraping",
+    "name": "Advanced Scraping",
+    "description": "Herramientas profesionales de scraping web con análisis de HTML, detección de patrones y exportación de datos",
+    "version": "1.0.0",
+    "author": "Scrapelio Team",
+    "category": "data_extraction",
+    "tags": ["scraping", "data", "extraction", "html", "xpath"],
+    "price": 9.99,
+    "currency": "USD",
+    "billing_cycle": "monthly",
+    "trial_days": 7,
+    "features": [
+        "Análisis avanzado de HTML",
+        "Detección automática de patrones",
+        "Selección interactiva de elementos",
+        "Exportación a CSV, JSON, Excel",
+        "Descubrimiento de URLs",
+        "Soporte para XPath y CSS Selectors"
+    ],
+    "dependencies": ["beautifulsoup4", "lxml", "pandas"],
+    "compatibility": ">=1.0.0",
+    "premium": true,
+    "icon": "🕷️",
+    "screenshots": [],
+    "changelog": {
+        "1.0.0": "Versión inicial con funcionalidad completa"
+    }
+}
+
+
+

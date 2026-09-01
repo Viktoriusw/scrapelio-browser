@@ -1,107 +1,72 @@
 <p align="center">
-  <img src="logoscrapelio.jpg" alt="Scrapelio Browser" width="220" />
+  <img src="logoscrapelio.png" alt="Scrapelio Browser" width="220" />
 </p>
 
-<h1 align="center">Scrapelio Browser</h1>
+## Scrapelio Browser
 
-<p align="center">
-  <strong>Navegador web ligero con sistema de plugins, IA integrada y foco en privacidad.</strong>
-</p>
+Navegador web ligero con sistema de plugins, IA integrada y foco en privacidad.
 
-<hr>
+## Instalación rápida (Linux)
 
-<h2> Instalación</h2>
+```bash
+cd /ruta/a/scrapelio-browser
 
-<h3>🐧 Linux / macOS</h3>
-
-<pre><code>cd /ruta/a/scrapelio-browser</code></pre>
-
-<h4>1. Dependencias del sistema</h4>
-
-<pre><code>sudo apt update
+# Dependencias del sistema (Qt/X11)
+sudo apt update
 sudo apt install -y python3 python3-venv python3-pip \
   libxcb-cursor0 libxcb-xinerama0 libxcb-xtest0 \
-  libgl1-mesa-glx libfontconfig1 libssl-dev</code></pre>
+  libgl1-mesa-glx libfontconfig1 libssl-dev
 
-<h4>2. Entorno virtual</h4>
-
-<pre><code>python3 -m venv venv
+# Entorno virtual
+python3 -m venv venv
 source venv/bin/activate
-pip install --upgrade pip</code></pre>
+pip install --upgrade pip
 
-<h4>3. Instalar PySide6 (paso obligatorio)</h4>
+# PASO CRÍTICO: PySide6 primero
+pip install --upgrade "PySide6>=6.5.0"
+python3 -c "from PySide6.QtWebEngineWidgets import QWebEngineView; print('PySide6 OK')"
 
-<p>Es la dependencia crítica del proyecto: sin ella el navegador no arranca. Instálala <strong>antes</strong> que el resto de <code>requirements.txt</code>, porque si esa instalación se interrumpe a medias (por ejemplo en un paquete pesado como <code>chromadb</code>), el entorno puede quedar sin PySide6.</p>
+# Resto de dependencias
+pip install -r requirements.txt
 
-<pre><code>pip install --upgrade "PySide6>=6.5.0"
-python3 -c "from PySide6.QtWebEngineWidgets import QWebEngineView; print('✅ PySide6 OK')"</code></pre>
+# Verificar e iniciar
+python3 check_dependencies.py
+python3 main.py
+```
 
-<h4>4. Resto de dependencias</h4>
+---
 
-<pre><code>pip install -r requirements.txt</code></pre>
+### Instalación
 
-<h4>5. Verificar instalación</h4>
+**Linux / macOS**
 
-<pre><code>python3 check_dependencies.py</code></pre>
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install --upgrade "PySide6>=6.5.0"    # obligatorio — instalar primero
+pip install -r requirements.txt
+python3 check_dependencies.py
+python3 main.py
+```
 
-<h4>6. Ejecutar el navegador</h4>
+> Sin **PySide6 + Qt WebEngine** el navegador no arranca. Ver [INSTALACION.md](INSTALACION.md) para la guía completa.
 
-<pre><code>python3 main.py</code></pre>
+**Windows**
 
-<h3>🪟 Windows</h3>
+```cmd
+run_windows.bat
+```
 
-<pre><code>cd \ruta\a\scrapelio-browser</code></pre>
+O manualmente: crear `venv_win`, instalar `PySide6>=6.5.0` primero, luego `requirements.txt`.
 
-<h4>1. Requisitos previos</h4>
+### Características principales
 
-<p>Python 3.10–3.12 instalado desde <a href="https://www.python.org/downloads/windows/">python.org</a>, marcando la opción <strong>"Add python.exe to PATH"</strong> durante la instalación.</p>
+- **Plugins de la comunidad**: sistema de plugins extensible, con plugins oficiales y desarrollados por la comunidad.
+- **Chat IA integrado**: panel de chat con IA y asistencia contextual dentro del navegador.
+- **IA en la navegación**: extracción de contexto de páginas, ayuda para búsquedas y tareas directamente sobre los sitios que visitas.
+- **Privacidad y seguridad**: gestor de contraseñas, controles avanzados de privacidad y utilidades de seguridad integradas.
+- **Navegador muy ligero**: interfaz en PySide6 optimizada, consumo reducido de recursos y tiempos de arranque rápidos.
 
-<h4>2. Entorno virtual</h4>
 
-<pre><code>python -m venv venv_win
-venv_win\Scripts\activate.bat
-python -m pip install --upgrade pip setuptools wheel</code></pre>
+### Licencia
 
-<h4>3. Instalar PySide6 (paso obligatorio)</h4>
-
-<p>Es la dependencia crítica del proyecto: sin ella el navegador no arranca. Instálala <strong>antes</strong> que el resto de <code>requirements.txt</code>, porque si esa instalación se interrumpe a medias (por ejemplo en un paquete pesado como <code>chromadb</code>), el entorno puede quedar sin PySide6.</p>
-
-<pre><code>pip install --upgrade "PySide6>=6.5.0"
-python -c "from PySide6.QtWebEngineWidgets import QWebEngineView; print('✅ PySide6 OK')"</code></pre>
-
-<h4>4. Resto de dependencias</h4>
-
-<pre><code>pip install -r requirements.txt</code></pre>
-
-<h4>5. Verificar instalación</h4>
-
-<pre><code>python check_dependencies.py</code></pre>
-
-<h4>6. Ejecutar el navegador</h4>
-
-<pre><code>venv_win\Scripts\activate.bat
-python main.py</code></pre>
-
-<hr>
-
-<h2> Características principales</h2>
-
-<ul>
-  <li><strong> Plugins de la comunidad</strong>: sistema de plugins extensible, con plugins oficiales y desarrollados por la comunidad.</li>
-  <li><strong> Chat IA integrado</strong>: panel de chat con IA y asistencia contextual dentro del navegador.</li>
-  <li><strong> IA en la navegación</strong>: extracción de contexto de páginas, ayuda para búsquedas y tareas directamente sobre los sitios que visitas.</li>
-  <li><strong> Privacidad y seguridad</strong>: gestor de contraseñas, controles avanzados de privacidad y utilidades de seguridad integradas.</li>
-  <li><strong> Navegador muy ligero</strong>: interfaz en PySide6 optimizada, consumo reducido de recursos y tiempos de arranque rápidos.</li>
-</ul>
-
-<hr>
-
-<h2>📄 Licencia</h2>
-
-<p>Consulta el archivo <code>LICENSE</code> para los términos completos de uso.</p>
-
-<hr>
-
-<p align="center">
-  <sub>Desarrollado con cariño para las personas libres</sub>
-</p>
+Consulta el archivo `LICENSE` para los términos completos de uso.
