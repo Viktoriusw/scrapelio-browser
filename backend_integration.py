@@ -68,6 +68,10 @@ from backend_schemas import (
     safe_validate,
     ValidationError
 )
+
+# Rutas de plugins multiplataforma (carpeta escribible por usuario).
+from plugin_paths import install_target_dir, backups_dir
+
 # Logging configurado en main.py
 logger = logging.getLogger(__name__)
 
@@ -1075,15 +1079,12 @@ class BackendIntegration(QObject):
 
                     from datetime import datetime
 
-                    # Crear directorio de plugins
+                    # Directorio del plugin específico, en la carpeta ESCRIBIBLE
+                    # por usuario (%APPDATA%/Scrapelio/plugins en Windows, etc.).
+                    # Antes era Path("plugins") relativo al CWD y fallaba en un
+                    # ejecutable instalado en una ruta de solo lectura.
 
-                    plugins_dir = Path("plugins")
-
-                    plugins_dir.mkdir(exist_ok=True)
-
-                    # Directorio del plugin específico
-
-                    plugin_dir = plugins_dir / plugin_id
+                    plugin_dir = install_target_dir(plugin_id)
 
                     # PASO 1: CREAR BACKUP SI EL PLUGIN YA EXISTE
 
@@ -1303,9 +1304,16 @@ class BackendIntegration(QObject):
 
             import shutil
 
-            # Obtener directorio de backups desde config
+            # Obtener directorio de backups: si config da una ruta absoluta se
+            # respeta; si no, se usa una carpeta escribible bajo los datos de
+            # usuario (evita './plugin_backups' relativo al CWD).
 
-            backup_base = Path(self.config.get('plugins.backup_directory', './plugin_backups'))
+            _cfg_backup = self.config.get('plugins.backup_directory', '')
+
+            if _cfg_backup and os.path.isabs(str(_cfg_backup)):
+                backup_base = Path(_cfg_backup)
+            else:
+                backup_base = backups_dir()
 
             backup_base.mkdir(parents=True, exist_ok=True)
 

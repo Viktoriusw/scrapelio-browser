@@ -77,6 +77,20 @@ from auth_manager import AuthManager, UserCredentials, PluginLicense, AuthState,
 
 from plugins.plugin_base import PluginBase, PluginMetadata
 
+# Rutas de plugins multiplataforma (carpeta escribible por usuario para las
+# descargas + carpeta bundled de solo lectura para los preinstalados).
+from plugin_paths import (
+    BUNDLED_PLUGINS_DIR,
+    USER_PLUGINS_DIR,
+    ensure_user_plugins_dir,
+    find_plugin_dir,
+    install_target_dir,
+    is_bundled_only,
+    iter_installed_plugin_ids,
+    resolve_config_file,
+    user_config_file,
+)
+
 
 class PluginAccessLevel(Enum):
     """Niveles de acceso a plugins"""
@@ -220,15 +234,11 @@ class PluginDownloader(QThread):
         """Instalar plugin desde archivo ZIP"""
 
         try:
-            plugins_dir = Path("plugins")
-
-            plugins_dir.mkdir(exist_ok=True)
-
-            plugin_dir = plugins_dir / plugin_id
+            plugin_dir = install_target_dir(plugin_id)
 
             if plugin_dir.exists():
                 shutil.rmtree(plugin_dir)
-            plugin_dir.mkdir(exist_ok=True)
+            plugin_dir.mkdir(parents=True, exist_ok=True)
 
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(plugin_dir)
@@ -284,10 +294,16 @@ class UnifiedPluginManager(QObject):
         logger.info(f"Backend URL configured: {self.api_base_url}")
 
         # Configuración de plugins desde config.yaml
+        # plugins_dir = carpeta ESCRIBIBLE (descargas del backend).
+        # bundled_plugins_dir = carpeta de SOLO LECTURA que viaja con la app
+        # (paquete base + plugins preinstalados/gratuitos).
 
-        self.plugins_dir = Path("plugins")
+        self.plugins_dir = ensure_user_plugins_dir()
 
-        self.config_file = "plugins/plugin_config.json"
+        self.bundled_plugins_dir = BUNDLED_PLUGINS_DIR
+
+        # Se ESCRIBE siempre en la copia de usuario; se LEE con fallback a la bundled.
+        self.config_file = str(user_config_file())
 
         self.plugins: Dict[str, PluginBase] = {}
 
@@ -418,10 +434,12 @@ class UnifiedPluginManager(QObject):
         """Cargar configuración de plugins"""
 
         try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r', encoding='utf-8') as f:
+            cfg_path = resolve_config_file()
+
+            if cfg_path.exists():
+                with open(cfg_path, 'r', encoding='utf-8') as f:
                     self.plugin_configs = json.load(f)
-                print(f"[UnifiedPluginManager] Configuración cargada desde {self.config_file}")
+                print(f"[UnifiedPluginManager] Configuración cargada desde {cfg_path}")
         except Exception as e:
             print(f"[UnifiedPluginManager] Error cargando configuración: {e}")
 
@@ -502,7 +520,7 @@ class UnifiedPluginManager(QObject):
         """Obtener información de acceso a un plugin con validación agresiva"""
 
         # Verificar si el plugin es gratuito leyendo su plugin_info.json
-        plugin_dir = Path("plugins") / plugin_id
+        plugin_dir = find_plugin_dir(plugin_id) or (self.plugins_dir / plugin_id)
         plugin_info_file = plugin_dir / "plugin_info.json"
         is_free_plugin = False
 
@@ -834,22 +852,31 @@ class UnifiedPluginManager(QObject):
     def is_plugin_installed(self, plugin_id: str) -> bool:
         """Verificar si un plugin está instalado"""
 
-        plugin_dir = self.plugins_dir / plugin_id
+        # Busca en la carpeta de usuario (descargas) y en la bundled (preinstalados).
+        plugin_dir = find_plugin_dir(plugin_id)
 
-        # Un plugin está instalado si:
-        # 1. Existe el directorio del plugin
-        # 2. Y tiene __init__.py (plugins locales) O .plugin_metadata.json (plugins descargados del backend)
-        if not plugin_dir.exists():
+        # Un plugin está instalado si existe su carpeta y tiene __init__.py
+        # (plugins locales) O plugin.py O .plugin_metadata.json (descargados del backend).
+        if plugin_dir is None:
             return False
         has_init = (plugin_dir / "__init__.py").exists()
         has_metadata = (plugin_dir / ".plugin_metadata.json").exists()
+        has_plugin_py = (plugin_dir / "plugin.py").exists()
 
-        return has_init or has_metadata
+        return has_init or has_metadata or has_plugin_py
     def uninstall_plugin(self, plugin_id: str) -> bool:
-        """Desinstalar un plugin"""
+        """Desinstalar un plugin (solo los descargados a la carpeta de usuario;
+        los preinstalados en el bundle no se pueden borrar)."""
 
         try:
-            plugin_dir = self.plugins_dir / plugin_id
+            if is_bundled_only(plugin_id):
+                print(
+                    f"[UnifiedPluginManager] Plugin '{plugin_id}' es preinstalado "
+                    f"(bundle de solo lectura); no se puede desinstalar"
+                )
+                return False
+
+            plugin_dir = USER_PLUGINS_DIR / plugin_id
 
             if plugin_dir.exists():
                 shutil.rmtree(plugin_dir)
@@ -865,16 +892,9 @@ class UnifiedPluginManager(QObject):
 
             return False
     def get_installed_plugins(self) -> List[str]:
-        """Obtener lista de plugins instalados"""
+        """Obtener lista de plugins instalados (usuario + bundled, sin duplicados)"""
 
-        if not self.plugins_dir.exists():
-            return []
-        installed = []
-
-        for item in self.plugins_dir.iterdir():
-            if item.is_dir() and (item / "__init__.py").exists():
-                installed.append(item.name)
-        return installed
+        return list(iter_installed_plugin_ids())
     def get_plugin_info(self, plugin_id: str) -> Optional[PluginInfo]:
         """Obtener información detallada de un plugin"""
 
@@ -1004,10 +1024,12 @@ class UnifiedPluginManager(QObject):
         """
 
         try:
-            plugin_dir = self.plugins_dir / plugin_id
+            # Busca en la carpeta de usuario (descargas) y luego en la bundled.
+            plugin_dir = find_plugin_dir(plugin_id)
 
-            if not plugin_dir.exists():
-                logger.error(f"Plugin directory not found: {plugin_dir}")
+            if plugin_dir is None or not plugin_dir.exists():
+                logger.error(f"Plugin directory not found for '{plugin_id}' "
+                             f"(buscado en {USER_PLUGINS_DIR} y {BUNDLED_PLUGINS_DIR})")
 
                 return False
             # Verificar que tenga __init__.py
@@ -1025,6 +1047,11 @@ class UnifiedPluginManager(QObject):
             import importlib.util
 
             import sys
+
+            # Asegura que la carpeta del plugin está en sys.path para sus
+            # imports internos (cada plugin.py también lo hace por su cuenta).
+            if str(plugin_dir) not in sys.path:
+                sys.path.insert(0, str(plugin_dir))
 
             module_name = f"plugins.{plugin_id}.plugin"
 
