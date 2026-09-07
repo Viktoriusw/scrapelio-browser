@@ -74,6 +74,9 @@ pip install chromadb>=0.4.0
 :: PDF export (plugin SEO)
 pip install reportlab>=4.0.0
 
+:: Legibilidad de texto (dependencia del plugin seo_analyzer)
+pip install textstat>=0.7.3
+
 echo.
 echo [INFO] Iniciando build con PyInstaller...
 echo       Esto puede tardar 5-15 minutos...

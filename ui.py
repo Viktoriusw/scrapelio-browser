@@ -60,6 +60,7 @@ except ImportError as _e:
 from password_manager import PasswordManager
 from auth_manager import AuthManager
 from auth_panel import LoginDialog, AuthPanel
+from plugin_paths import find_plugin_dir, BUNDLED_PLUGINS_DIR
 import time
 import urllib.parse
 
@@ -3112,14 +3113,13 @@ class MainWindow(QMainWindow):
                 import sys
                 from pathlib import Path
 
-                plugin_dir = (
-                    Path(__file__).parent
-                    / "plugins"
-                    / "pentesting_tool"
-                    / "pentesting_tool"
+                _pt_base = find_plugin_dir("pentesting_tool") or (
+                    BUNDLED_PLUGINS_DIR / "pentesting_tool"
                 )
-                if str(plugin_dir) not in sys.path:
-                    sys.path.insert(0, str(plugin_dir))
+                plugin_dir = _pt_base / "pentesting_tool"
+                for _p in (str(_pt_base), str(plugin_dir)):
+                    if _p not in sys.path:
+                        sys.path.insert(0, _p)
                 from plugins.pentesting_tool.pentesting_tool.ui.panel import (
                     PentestingPanel as PentestingPanelClass,
                 )
@@ -4504,24 +4504,29 @@ class MainWindow(QMainWindow):
             import json
             import os
             from pathlib import Path
+            from plugin_paths import (
+                resolve_config_file,
+                find_plugin_dir,
+                iter_installed_plugin_ids,
+            )
 
             loaded_any = False
 
             # 1. Cargar desde plugin_config.json (plugins registrados)
-            config_file = "plugins/plugin_config.json"
+            config_file = resolve_config_file()
             plugin_config = {}
-            if os.path.exists(config_file):
+            if config_file.exists():
                 with open(config_file, "r") as f:
                     plugin_config = json.load(f)
 
             for plugin_id, config in plugin_config.items():
                 if not config.get("enabled", False):
                     continue
-                plugin_dir = os.path.join("plugins", plugin_id)
-                if not os.path.exists(plugin_dir):
+                plugin_dir = find_plugin_dir(plugin_id)
+                if plugin_dir is None:
                     continue
 
-                plugin_info_file = os.path.join(plugin_dir, "plugin_info.json")
+                plugin_info_file = os.path.join(str(plugin_dir), "plugin_info.json")
                 is_premium = False
                 if os.path.exists(plugin_info_file):
                     try:
@@ -4546,18 +4551,18 @@ class MainWindow(QMainWindow):
 
             # 2. Descubrimiento automático de plugins gratuitos nuevos (para desarrollo)
             # Esto permite que un plugin nuevo con "premium": false en su plugin_info.json
-            # se cargue aunque no esté todavía en plugin_config.json
-            plugins_dir = Path("plugins")
-            if plugins_dir.exists():
-                for item in plugins_dir.iterdir():
-                    if not item.is_dir():
-                        continue
-                    plugin_id = item.name
+            # se cargue aunque no esté todavía en plugin_config.json.
+            # Recorre tanto los plugins descargados (carpeta de usuario) como los
+            # preinstalados (bundle).
+            for plugin_id in iter_installed_plugin_ids():
                     if plugin_id in plugin_config:   # ya procesado arriba
                         continue
                     if plugin_id in self.plugin_manager.plugins:  # ya cargado
                         continue
 
+                    item = find_plugin_dir(plugin_id)
+                    if item is None:
+                        continue
                     init_file = item / "__init__.py"
                     info_file = item / "plugin_info.json"
                     if not init_file.exists() or not info_file.exists():
@@ -5058,14 +5063,13 @@ class MainWindow(QMainWindow):
             import sys
             from pathlib import Path
 
-            plugin_dir = (
-                Path(__file__).parent
-                / "plugins"
-                / "pentesting_tool"
-                / "pentesting_tool"
+            _pt_base = find_plugin_dir("pentesting_tool") or (
+                BUNDLED_PLUGINS_DIR / "pentesting_tool"
             )
-            if str(plugin_dir) not in sys.path:
-                sys.path.insert(0, str(plugin_dir))
+            plugin_dir = _pt_base / "pentesting_tool"
+            for _p in (str(_pt_base), str(plugin_dir)):
+                if _p not in sys.path:
+                    sys.path.insert(0, _p)
             # Obtener clase del panel
             PentestingPanelClass = plugin_module.get_panel_class()
 
@@ -5155,7 +5159,10 @@ class MainWindow(QMainWindow):
             import sys
             from pathlib import Path
 
-            plugin_dir = Path(__file__).parent / "plugins" / "ai_live_ide"
+            from plugin_paths import resolve_config_file
+            plugin_dir = find_plugin_dir("ai_live_ide") or (
+                BUNDLED_PLUGINS_DIR / "ai_live_ide"
+            )
             if str(plugin_dir) not in sys.path:
                 sys.path.insert(0, str(plugin_dir))
             AILiveIDEPanelClass = plugin_module.get_panel_class()
@@ -5166,7 +5173,7 @@ class MainWindow(QMainWindow):
             # Detectar modo desarrollo desde plugin_config.json
             import json
             dev_mode = False
-            cfg_path = Path(__file__).parent / "plugins" / "plugin_config.json"
+            cfg_path = resolve_config_file()
             try:
                 if cfg_path.exists():
                     with open(cfg_path, "r", encoding="utf-8") as _f:

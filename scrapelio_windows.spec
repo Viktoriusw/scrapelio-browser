@@ -140,6 +140,12 @@ app_hiddenimports = [
     'reportlab',
     'reportlab.lib',
     'reportlab.platypus',
+    # Legibilidad de texto (dependencia declarada por el plugin seo_analyzer)
+    'textstat',
+    # Allow-list de dependencias de plugins: todo plugin descargado del backend
+    # solo puede usar la stdlib + estas librerías (ya empaquetadas arriba):
+    #   requests, aiohttp, aiohttp_socks, bs4, lxml, pandas, numpy, openpyxl,
+    #   yaml, PIL, reportlab, textstat, cryptography, jwt, psutil.
     # Monaco editor (plugin ai_live_ide) — solo archivos estáticos, no imports adicionales
 ]
 
