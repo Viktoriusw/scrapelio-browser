@@ -52,15 +52,15 @@ project_datas = [
     ('light_theme.json', '.'),
     ('config.yaml', '.'),
     ('unified_plugin_config.json', '.'),
-    ('tab_groups.json', '.'),
     ('logo.png', '.'),
     ('logoscrapelio.png', '.'),
 ]
 
-# Agregar .db si existen (bases de datos vacías para distribución)
-for db in ['bookmarks.db', 'passwords.db', 'downloads_history.db']:
-    if os.path.exists(db):
-        project_datas.append((db, '.'))
+# Agregar archivos de estado en tiempo de ejecución solo si existen (no viven
+# en el repo: bases de datos vacías, sesión de pestañas, etc.)
+for runtime_file in ['bookmarks.db', 'passwords.db', 'downloads_history.db', 'tab_groups.json']:
+    if os.path.exists(runtime_file):
+        project_datas.append((runtime_file, '.'))
 
 # ── Hidden imports del proyecto ─────────────────────────────────────────────
 app_hiddenimports = [
@@ -119,7 +119,6 @@ app_hiddenimports = [
     'PIL.Image',
     'PIL.ImageDraw',
     'PIL.ImageFont',
-    'qdarktheme',
     'qtawesome',
     'jwt',
     'cryptography',
