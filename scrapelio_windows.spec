@@ -161,7 +161,6 @@ excludes = [
     'keras',
     'test',
     'unittest',
-    'pydoc',
     'doctest',
 ]
 
