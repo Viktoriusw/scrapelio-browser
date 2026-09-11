@@ -36,7 +36,7 @@ def verificar_import_en_ui():
     print("=" * 60)
 
     try:
-        with open("ui.py", "r", encoding="utf-8") as f:
+        with open("main_window.py", "r", encoding="utf-8") as f:
             contenido = f.read()
         # Buscar el import del plugin
         if "from plugins.seo_analyzer.plugin import SEOAnalyzerPlugin" in contenido:
@@ -62,7 +62,7 @@ def verificar_inicializacion():
     print("=" * 60)
 
     try:
-        with open("ui.py", "r", encoding="utf-8") as f:
+        with open("main_window.py", "r", encoding="utf-8") as f:
             contenido = f.read()
         checks = [
             ("self.seo_plugin = SEOAnalyzerPlugin()", "Instanciación del plugin"),
@@ -89,7 +89,7 @@ def verificar_boton_sidebar():
     print("=" * 60)
 
     try:
-        with open("ui.py", "r", encoding="utf-8") as f:
+        with open("main_window.py", "r", encoding="utf-8") as f:
             contenido = f.read()
         checks = [
             ("self.seo_action = create_strip_action", "Creación de la acción"),
@@ -117,7 +117,7 @@ def verificar_metodo_toggle():
     print("=" * 60)
 
     try:
-        with open("ui.py", "r", encoding="utf-8") as f:
+        with open("main_window.py", "r", encoding="utf-8") as f:
             contenido = f.read()
         if "def toggle_seo_panel(self):" in contenido:
             print("✅ Método toggle_seo_panel() encontrado")

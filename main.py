@@ -3,7 +3,6 @@
 Scrapelio Browser — punto de entrada principal.
 """
 
-import importlib.util
 import logging
 import os
 import socket
@@ -119,11 +118,10 @@ def _configure_stealth_chromium_flags():
 _configure_tor_proxy_if_needed()
 _configure_stealth_chromium_flags()
 
-# Importar MainWindow desde ui.py (no desde el paquete ui/)
 sys.path.insert(0, os.path.dirname(__file__))
 
 # Registrar rutas de plugins (paquete bundled + carpeta escribible de usuario)
-# ANTES de importar ui.py / el gestor de plugins.
+# ANTES de importar main_window / el gestor de plugins.
 try:
     import plugin_paths
     plugin_paths.register_sys_path()
@@ -134,12 +132,7 @@ try:
     )
 except Exception as _e:  # pragma: no cover
     _logger.warning("[PLUGINS] No se pudo inicializar plugin_paths: %s", _e)
-spec = importlib.util.spec_from_file_location(
-    "ui_module", os.path.join(os.path.dirname(__file__), "ui.py")
-)
-ui_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ui_module)
-MainWindow = ui_module.MainWindow
+from main_window import MainWindow
 
 
 class BookmarkListener(Thread):
