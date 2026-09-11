@@ -1,0 +1,33 @@
+# UTF-8
+#
+# Metadatos de versión para el .exe de Windows (usado por scrapelio_windows.spec).
+# Generado para Scrapelio Browser 3.4.14.
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(3, 4, 14, 0),
+    prodvers=(3, 4, 14, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'040904B0',
+        [StringStruct(u'CompanyName', u'Scrapelio'),
+        StringStruct(u'FileDescription', u'Scrapelio Browser'),
+        StringStruct(u'FileVersion', u'3.4.14.0'),
+        StringStruct(u'InternalName', u'Scrapelio Browser'),
+        StringStruct(u'LegalCopyright', u'Scrapelio'),
+        StringStruct(u'OriginalFilename', u'Scrapelio Browser.exe'),
+        StringStruct(u'ProductName', u'Scrapelio Browser'),
+        StringStruct(u'ProductVersion', u'3.4.14.0')])
+      ]),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)
