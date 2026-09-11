@@ -54,7 +54,6 @@ pip install PyYAML>=6.0
 pip install Pillow>=9.0.0
 
 :: UI
-pip install qdarktheme>=2.0
 pip install qtawesome>=1.3
 
 :: Auth
