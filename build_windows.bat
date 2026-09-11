@@ -81,6 +81,13 @@ echo [INFO] Iniciando build con PyInstaller...
 echo       Esto puede tardar 5-15 minutos...
 echo.
 
+:: config.yaml no viaja en el repo (esta en .gitignore). Si falta, se crea
+:: a partir de la plantilla para que el build no falle en un clon limpio.
+if not exist "config.yaml" (
+    echo [INFO] config.yaml no existe, creandolo desde config.example.yaml...
+    copy /y config.example.yaml config.yaml >nul
+)
+
 :: Limpiar builds anteriores
 if exist "build" rmdir /s /q build
 if exist "dist\Scrapelio Browser" rmdir /s /q "dist\Scrapelio Browser"
